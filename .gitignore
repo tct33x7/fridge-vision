@@ -29,3 +29,7 @@ camera_system/data/
 
 # 压缩包与运行期上传
 *.zip
+
+# fridge_vision 运行输出与自动下载的权重
+fridge_vision/runs/
+fridge_vision/*.pt
