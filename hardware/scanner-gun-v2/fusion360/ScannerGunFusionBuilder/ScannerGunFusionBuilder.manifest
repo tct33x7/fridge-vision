@@ -1,0 +1,10 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "script",
+  "author": "BX Project",
+  "description": {
+    "": "Builds editable Fusion and STEP versions of Scanner Gun V2."
+  },
+  "supportedOS": "mac|windows",
+  "editEnabled": true
+}

@@ -1,0 +1,26 @@
+# 一条命令在任意装了 Docker 的云主机上启动：
+#   DEEPSEEK_API_KEY=sk-xxx docker compose up -d --build
+services:
+  smart-fridge:
+    build: .
+    image: smart-fridge:latest
+    container_name: smart-fridge
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      PORT: "8000"
+      SMART_FRIDGE_STORAGE_DIR: /data/storage
+      SMART_FRIDGE_GPIO_BUTTON_ENABLED: "false"
+      SMART_FRIDGE_MAX_UPLOAD_MB: "15"
+      # 不要把密钥写进 config/api_settings.json 再打进镜像；用环境变量注入
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      DEEPSEEK_BASE_URL: "${DEEPSEEK_BASE_URL:-https://api.deepseek.com}"
+      DEEPSEEK_MODEL: "${DEEPSEEK_MODEL:-deepseek-v4-flash}"
+    volumes:
+      - fridge-data:/data
+      # 有 YOLO 权重时取消注释，把本机 food_best.onnx 挂进去
+      # - ./yolo/food_best.onnx:/app/yolo/food_best.onnx:ro
+
+volumes:
+  fridge-data:

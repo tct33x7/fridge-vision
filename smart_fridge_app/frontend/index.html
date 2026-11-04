@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f3ed">
+  <title>饮食均衡助手</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <button class="brand-button" data-view="home" type="button" aria-label="返回今天">
+      <span class="brand-mark" aria-hidden="true">B</span>
+      <span><small>LOCAL FOOD</small><strong>饮食均衡助手</strong></span>
+    </button>
+    <div id="systemStatus" class="status-pill is-hidden" aria-live="polite"></div>
+  </header>
+
+  <nav class="primary-nav" aria-label="主要页面">
+    <button class="nav-button is-active" data-view="home" type="button">今天</button>
+    <button class="nav-button" data-view="inventory" type="button">库存</button>
+    <button class="nav-button" data-view="capture" type="button">识别记录</button>
+    <button class="nav-button" data-view="settings" type="button">设置</button>
+  </nav>
+
+  <main>
+    <section id="view-home" class="view is-active" aria-labelledby="homeTitle">
+      <div class="home-hero">
+        <div>
+          <p id="todayLabel" class="eyebrow"></p>
+          <h1 id="homeTitle">今天先处理什么？</h1>
+          <p id="homeSubtitle" class="hero-subtitle">只展示你真正记录过的内容。</p>
+        </div>
+        <button class="primary-button hero-action" data-open-intake type="button">
+          <span aria-hidden="true">＋</span> 拍照添加食材
+        </button>
+      </div>
+
+      <div id="onboardingNotice" class="notice is-hidden">
+        <div>
+          <strong>先完成偏好设置</strong>
+          <p>偏好、过敏和用药只用于筛选与提醒。</p>
+        </div>
+        <button type="button" data-view="settings">去设置</button>
+      </div>
+
+      <section id="homeEmpty" class="activation-card is-hidden" aria-labelledby="homeEmptyTitle">
+        <div class="activation-orb" aria-hidden="true">⌁</div>
+        <div>
+          <p class="eyebrow">START HERE</p>
+          <h2 id="homeEmptyTitle">拍下第一件食材</h2>
+          <p>照片确认后才会进入库存；没有真实记录时，首页不会生成空趋势。</p>
+        </div>
+        <button class="primary-button" data-open-intake type="button">开始拍摄</button>
+      </section>
+
+      <section id="actionSection" class="home-section is-hidden" aria-labelledby="actionTitle">
+        <div class="section-heading compact-heading">
+          <div><p class="eyebrow">NOW</p><h2 id="actionTitle">现在要处理</h2></div>
+        </div>
+        <div id="actionList" class="action-list"></div>
+      </section>
+
+      <section id="inventoryOverview" class="home-section is-hidden" aria-labelledby="overviewTitle">
+        <div class="section-heading compact-heading">
+          <div><p class="eyebrow">INVENTORY</p><h2 id="overviewTitle">现有库存</h2></div>
+          <button class="text-link" data-view="inventory" type="button">查看全部</button>
+        </div>
+        <div id="summaryCards" class="summary-grid"></div>
+      </section>
+
+      <section id="expirySection" class="home-section is-hidden" aria-labelledby="expiryTitle">
+        <div class="section-heading compact-heading">
+          <div><p class="eyebrow">USE FIRST</p><h2 id="expiryTitle">优先处理</h2></div>
+        </div>
+        <div id="priorityList" class="priority-grid"></div>
+      </section>
+
+      <section id="recipeSection" class="home-section is-hidden" aria-labelledby="recipeTitle">
+        <div class="section-heading compact-heading">
+          <div><p class="eyebrow">COOK WITH WHAT YOU HAVE</p><h2 id="recipeTitle">可以做什么</h2></div>
+        </div>
+        <div id="recipeList" class="recipe-grid"></div>
+      </section>
+
+      <section id="insightsSection" class="home-section is-hidden" aria-labelledby="insightsTitle">
+        <div class="section-heading compact-heading">
+          <div><p class="eyebrow">ACTUAL INTAKE</p><h2 id="insightsTitle">真实摄入记录</h2></div>
+          <div class="segmented-control" aria-label="趋势时间范围">
+            <button class="is-active" data-insight-days="7" type="button">7 天</button>
+            <button data-insight-days="28" type="button">28 天</button>
+          </div>
+        </div>
+        <div id="nutritionPanel" class="insight-panel is-hidden">
+          <div class="insight-title-row">
+            <div><h3>营养趋势</h3><p id="nutritionCoverage"></p></div>
+          </div>
+          <div id="nutritionTotals" class="nutrition-totals"></div>
+          <div id="nutritionChart" class="nutrition-chart" role="img" aria-label="每日已记录能量趋势"></div>
+        </div>
+        <div id="flavorPanel" class="insight-panel is-hidden">
+          <div class="insight-title-row"><div><h3 id="flavorTitle">口味记录</h3><p id="flavorSample"></p></div></div>
+          <div id="flavorChart" class="flavor-chart"></div>
+        </div>
+      </section>
+
+      <section id="recentSection" class="home-section is-hidden" aria-labelledby="recentTitle">
+        <div class="section-heading compact-heading">
+          <div><p class="eyebrow">RECENT</p><h2 id="recentTitle">最近拍摄</h2></div>
+          <button class="text-link" data-view="capture" type="button">查看记录</button>
+        </div>
+        <div id="recentCaptures" class="recent-captures"></div>
+      </section>
+    </section>
+
+    <section id="view-inventory" class="view" aria-labelledby="inventoryTitle">
+      <div class="section-heading">
+        <div><p class="eyebrow">INVENTORY</p><h1 id="inventoryTitle">食物库存</h1></div>
+        <button class="primary-button" data-open-intake type="button">＋ 拍照添加</button>
+      </div>
+      <div class="filter-bar">
+        <label><span>搜索</span><input id="inventorySearch" type="search" placeholder="名称或类别"></label>
+        <label><span>位置</span><select id="inventoryLocationFilter"><option value="">全部位置</option></select></label>
+        <label><span>状态</span><select id="inventoryStateFilter"><option value="active">现有库存</option><option value="used">已吃完</option><option value="discarded">已丢弃</option></select></label>
+      </div>
+      <div id="inventoryList" class="inventory-list" aria-live="polite"></div>
+    </section>
+
+    <section id="view-capture" class="view" aria-labelledby="captureTitle">
+      <div class="section-heading">
+        <div><p class="eyebrow">PHOTO INTAKE</p><h1 id="captureTitle">识别记录</h1></div>
+        <button class="primary-button" data-open-intake type="button">＋ 添加食材</button>
+      </div>
+      <div id="captureHistory" class="history-grid"></div>
+      <div id="captureHistoryEmpty" class="activation-card is-hidden">
+        <div class="activation-orb" aria-hidden="true">⌁</div>
+        <div><h2>还没有拍摄记录</h2><p>新照片会在确认写入主软件后出现在这里。</p></div>
+        <button class="primary-button" data-open-intake type="button">拍第一张</button>
+      </div>
+    </section>
+
+    <section id="view-settings" class="view" aria-labelledby="settingsTitle">
+      <div class="section-heading"><div><p class="eyebrow">PROFILE</p><h1 id="settingsTitle">偏好设置</h1></div></div>
+      <form id="profileForm" class="panel settings-form">
+        <div class="form-grid">
+          <label><span>称呼</span><input name="display_name" maxlength="80" placeholder="可留空"></label>
+          <label><span>饮食目标</span><select name="diet_goal"><option value="balanced">均衡饮食</option><option value="weight_loss">体重管理</option><option value="muscle_gain">增肌</option><option value="other">其他</option></select></label>
+          <label class="span-two"><span>饮食偏好</span><input name="preferences" placeholder="清淡，粤菜，少辣"></label>
+          <label class="span-two"><span>过敏 / 禁忌</span><input name="allergies" placeholder="花生，虾"></label>
+          <label class="span-two"><span>正在使用的药物</span><input name="medications" placeholder="只作记录，不自动判断相互作用"></label>
+        </div>
+        <label class="checkbox-row"><input name="onboarding_completed" type="checkbox"><span>我已核对以上信息</span></label>
+        <div class="medical-warning">涉及过敏、慢性病或药物相互作用时，请咨询医生或药师。</div>
+        <div class="form-actions"><button class="primary-button" type="submit">保存设置</button></div>
+      </form>
+    </section>
+  </main>
+
+  <dialog id="intakeDialog" class="intake-dialog" aria-labelledby="intakeTitle">
+    <div class="dialog-shell">
+      <header class="dialog-header">
+        <div><p class="eyebrow">ADD FOOD</p><h2 id="intakeTitle">拍照添加食材</h2></div>
+        <div class="dialog-header-actions">
+          <span id="cameraStatus" class="inline-status" aria-live="polite">检查相机</span>
+          <button id="closeIntake" class="icon-button" type="button" aria-label="稍后继续">×</button>
+        </div>
+      </header>
+
+      <div class="intake-workspace">
+        <section class="camera-stage" aria-label="摄像头画面">
+          <div class="preview-shell">
+            <img id="cameraPreview" alt="设备摄像头实时画面">
+            <div id="cameraPlaceholder" class="preview-placeholder"><strong>等待摄像头</strong><span>相机连接后即可拍摄</span></div>
+          </div>
+          <div class="camera-controls">
+            <button id="captureButton" class="shutter-button" type="button" disabled aria-label="拍照"><span></span></button>
+            <p id="captureHint">拍摄后会立即保存到主软件</p>
+          </div>
+        </section>
+
+        <aside class="session-rail" aria-labelledby="sessionCaptureTitle">
+          <div class="rail-heading"><h3 id="sessionCaptureTitle">本次拍摄</h3><span id="sessionCaptureCount">0</span></div>
+          <div id="sessionCaptures" class="session-captures"><div class="session-empty">照片只会出现在这次会话中</div></div>
+        </aside>
+      </div>
+
+      <section id="reviewPanel" class="review-panel is-hidden" aria-labelledby="reviewTitle">
+        <div class="review-heading"><div><p class="eyebrow">CONFIRM</p><h3 id="reviewTitle">确认食材信息</h3></div><span id="selectedCaptureLabel"></span></div>
+        <form id="inventoryForm">
+          <div class="form-grid intake-form-grid">
+            <label class="span-two"><span>食物名称 *</span><input name="name" required maxlength="120" autocomplete="off" placeholder="例如：番茄"></label>
+            <label><span>数量 *</span><input name="quantity" type="number" min="0.01" max="1000000" step="0.01" value="1" required></label>
+            <label><span>单位</span><select name="unit"><option value="piece">个</option><option value="pack">包</option><option value="box">盒</option><option value="bottle">瓶</option><option value="g">克</option><option value="kg">千克</option><option value="ml">毫升</option><option value="l">升</option></select></label>
+            <label><span>储存位置</span><select id="inventoryLocation" name="location_id"></select></label>
+            <label><span>到期日</span><input name="expires_on" type="date"></label>
+            <label><span>类别</span><select name="category"><option value="vegetable">蔬菜</option><option value="fruit">水果</option><option value="protein">蛋白质</option><option value="dairy">奶制品</option><option value="grain">主食</option><option value="condiment">调料</option><option value="other" selected>其他</option></select></label>
+            <label><span>主要口味（选填）</span><select name="primary_flavor"><option value="">未记录</option><option value="light">清淡</option><option value="savory">咸鲜</option><option value="sour">酸爽</option><option value="sweet">甜味</option><option value="spicy">香辣</option><option value="bitter">苦味</option><option value="rich">浓郁</option></select></label>
+          </div>
+          <details class="optional-details">
+            <summary>营养与备注（选填）</summary>
+            <div class="nutrition-form">
+              <label><span>营养基准数量</span><input name="nutrition_basis_amount" type="number" min="0.01" step="0.01" placeholder="例如 100"></label>
+              <label><span>基准单位</span><select name="nutrition_basis_unit"><option value="g">克</option><option value="kg">千克</option><option value="ml">毫升</option><option value="l">升</option><option value="piece">个</option><option value="pack">包</option><option value="box">盒</option><option value="bottle">瓶</option></select></label>
+              <label><span>能量 kcal</span><input name="calories_kcal" type="number" min="0" step="0.01"></label>
+              <label><span>蛋白质 g</span><input name="protein_g" type="number" min="0" step="0.01"></label>
+              <label><span>碳水 g</span><input name="carbs_g" type="number" min="0" step="0.01"></label>
+              <label><span>脂肪 g</span><input name="fat_g" type="number" min="0" step="0.01"></label>
+              <label class="span-two"><span>备注</span><input name="note" maxlength="500" placeholder="品牌、开封状态等"></label>
+            </div>
+          </details>
+          <div class="dialog-footer">
+            <button id="cancelSession" class="text-button danger-text" type="button">放弃本次</button>
+            <div><button id="retakeButton" class="secondary-button" type="button">继续拍</button><button class="primary-button" type="submit">确认加入库存</button></div>
+          </div>
+        </form>
+      </section>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

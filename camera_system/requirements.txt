@@ -1,0 +1,7 @@
+# Install these from the Linux distribution where possible:
+#   sudo apt install python3-opencv python3-libgpiod gpiod \
+#     tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
+#
+# The application uses the libgpiod Python 1.x API.
+opencv-python>=4.5
+gpiod>=1.5,<2

@@ -1,0 +1,31 @@
+[Unit]
+Description=Smart Fridge local-first main application
+After=network.target camera-capture.service
+Wants=camera-capture.service
+
+[Service]
+Type=simple
+User=orangepi
+Group=orangepi
+StateDirectory=smart-fridge
+StateDirectoryMode=0750
+WorkingDirectory=/opt/smart-fridge
+EnvironmentFile=-/etc/smart-fridge/main.env
+Environment=SMART_FRIDGE_DATA_DIR=/var/lib/smart-fridge
+Environment=SMART_FRIDGE_CAMERA_URL=http://127.0.0.1:8001
+ExecStart=/opt/smart-fridge/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=3
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/smart-fridge
+
+[Install]
+WantedBy=multi-user.target

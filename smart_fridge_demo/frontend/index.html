@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ffdd2d">
+  <meta name="description" content="食光冰箱：小票识别、过期管理与智能库存 Demo">
+  <title>食光冰箱 · Smart Fridge</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="side-rail" aria-label="主导航">
+      <button class="brand" data-view="home" aria-label="回到首页">
+        <span class="brand-mark">F!</span>
+        <span class="brand-copy"><b>食光冰箱</b><small>FRIGO!</small></span>
+      </button>
+      <nav class="rail-nav">
+        <button class="nav-item active" data-view="home"><span>⌂</span><b>今天</b></button>
+        <button class="nav-item" data-view="inventory"><span>▦</span><b>库存</b></button>
+        <button class="nav-item nav-scan" data-view="scan"><span>＋</span><b>识别</b></button>
+        <button class="nav-item" data-view="camera"><span>◉</span><b>摄像头</b></button>
+        <button class="nav-item" data-view="recipes"><span>♨</span><b>食谱</b></button>
+      </nav>
+      <div class="device-card">
+        <span id="healthDot" class="health-dot"></span>
+        <div><b id="healthText">连接中</b><small>本地数据模式</small></div>
+      </div>
+    </aside>
+
+    <main class="main-stage">
+      <header class="mobile-header">
+        <button class="brand mini" data-view="home"><span class="brand-mark">F!</span><span class="brand-copy"><b>食光冰箱</b><small>FRIGO!</small></span></button>
+        <button class="round-button" id="quickScan" aria-label="快速识别">＋</button>
+      </header>
+
+      <section class="view active" id="view-home" aria-labelledby="homeTitle">
+        <div class="page-heading">
+          <div><p class="kicker">MONDAY · 冰箱状态良好</p><h1 id="homeTitle">嗨，今天吃点新鲜的！</h1></div>
+          <button class="pill-button" data-view="scan">⌁ 上传小票</button>
+        </div>
+
+        <div class="hero-grid">
+          <article class="status-hero panel black-panel">
+            <div class="hero-top"><span class="sticker lime">LIVE FRESH</span><span class="hero-spark">✦</span></div>
+            <p>当前冰箱共有</p>
+            <div class="big-number"><strong id="totalCount">0</strong><span>批食材</span></div>
+            <div class="hero-foot">
+              <div><b id="freshCount">0</b><span>状态新鲜</span></div>
+              <div><b id="unknownCount">0</b><span>待补日期</span></div>
+              <button class="circle-arrow" data-view="inventory" aria-label="查看库存">↗</button>
+            </div>
+          </article>
+
+          <article class="alert-card panel coral-panel">
+            <span class="card-icon">⏱</span>
+            <p>临期提醒</p>
+            <strong id="expiringCount">0</strong>
+            <span id="expiryHint">暂无临期食材</span>
+          </article>
+
+          <article class="scan-card panel yellow-panel">
+            <span class="card-icon">▣</span>
+            <p>待确认识别</p>
+            <strong id="pendingCount">0</strong>
+            <button data-view="scan">去处理 →</button>
+          </article>
+        </div>
+
+        <div class="content-grid">
+          <section class="panel inventory-preview">
+            <div class="section-heading"><div><span class="eyebrow">MY FRIDGE</span><h2>冰箱里有什么</h2></div><button class="text-button" data-view="inventory">全部库存 ↗</button></div>
+            <div id="homeInventory" class="food-row"></div>
+          </section>
+
+          <section class="panel nutrition-card">
+            <div class="section-heading"><div><span class="eyebrow">NUTRITION</span><h2>库存营养能量</h2></div><span class="tiny-badge">估算</span></div>
+            <div class="calorie-line"><strong id="caloriesValue">0</strong><span>kcal 可用能量</span></div>
+            <div id="nutritionBars" class="nutrition-bars"></div>
+            <p class="fine-print">按库存估算重量与每 100g 营养计算</p>
+          </section>
+        </div>
+
+        <section class="panel recipe-hero" id="homeRecipe">
+          <div class="recipe-copy"><span class="sticker purple">TODAY'S PICK</span><p>今日推荐</p><h2>先录入食材，马上开饭</h2><span>推荐会优先使用临期食材</span><button class="dark-button" data-view="recipes">查看做法 <b>↗</b></button></div>
+          <div class="recipe-art" aria-hidden="true"><span class="plate">♨</span><span class="spark one">✦</span><span class="spark two">✱</span></div>
+        </section>
+      </section>
+
+      <section class="view" id="view-inventory" aria-labelledby="inventoryTitle">
+        <div class="page-heading compact">
+          <div><p class="kicker">PANTRY CONTROL</p><h1 id="inventoryTitle">我的库存</h1><p class="page-subtitle">每次入库、使用和丢弃都会留下流水。</p></div>
+          <button class="pill-button" id="toggleManual">＋ 手动录入</button>
+        </div>
+        <form id="manualForm" class="panel manual-form hidden">
+          <div class="section-heading"><div><span class="eyebrow">QUICK ADD</span><h2>手动添加食材</h2></div><button type="button" class="icon-button" id="closeManual">×</button></div>
+          <div class="form-grid">
+            <label><span>商品名称</span><input name="name" required placeholder="例如：原味酸奶"></label>
+            <label><span>分类</span><select name="category"><option>乳品</option><option>肉类</option><option>蛋类</option><option>蔬果</option><option>烘焙</option><option>粮油</option><option>其他</option></select></label>
+            <label><span>数量</span><input name="quantity" type="number" min="0.01" step="0.01" value="1" required></label>
+            <label><span>单位</span><select name="unit"><option>份</option><option>件</option><option>盒</option><option>瓶</option><option>袋</option><option>个</option><option>克</option></select></label>
+            <label><span>到期日期</span><input name="expiry_date" type="date"></label>
+            <label><span>存放位置</span><select name="storage_location"><option>冷藏室</option><option>冷冻室</option><option>常温区</option></select></label>
+          </div>
+          <button class="primary-button" type="submit">确认入库</button>
+        </form>
+
+        <div class="filter-row" role="group" aria-label="库存筛选">
+          <button class="filter-chip active" data-filter="all">全部 <b id="filterAllCount">0</b></button>
+          <button class="filter-chip" data-filter="expiring">临期</button>
+          <button class="filter-chip" data-filter="unknown">待补日期</button>
+          <label class="search-box"><span>⌕</span><input id="inventorySearch" placeholder="搜索食材"></label>
+        </div>
+        <div id="inventoryGrid" class="inventory-grid"></div>
+      </section>
+
+      <section class="view" id="view-camera" aria-labelledby="liveCameraTitle">
+        <div class="page-heading compact">
+          <div><p class="kicker">USB CAMERA · GPIO CAPTURE</p><h1 id="liveCameraTitle">冰箱摄像头</h1><p class="page-subtitle">实时画面来自 /dev/video0；网页按钮或物理 7 号引脚按钮都可以触发拍照识别。</p></div>
+          <span id="cameraTopStatus" class="camera-top-status">正在连接</span>
+        </div>
+        <div class="camera-live-layout">
+          <section class="panel live-camera-panel">
+            <div class="camera-screen">
+              <img id="liveCameraStream" alt="USB 摄像头实时画面">
+              <div id="cameraOffline" class="camera-offline"><span>◉</span><b>等待摄像头画面</b><small>请确认 USB 摄像头连接到 /dev/video0</small></div>
+              <span class="live-indicator"><i></i> LIVE</span>
+            </div>
+            <div class="camera-readout">
+              <div><small>视频设备</small><b id="cameraDeviceText">/dev/video0</b></div>
+              <div><small>画面规格</small><b id="cameraResolutionText">1280 × 720</b></div>
+              <div><small>物理按钮</small><b id="buttonConnectionText">7 号脚 · 检测中</b></div>
+            </div>
+          </section>
+
+          <section class="panel camera-control-panel">
+            <span class="eyebrow">CAPTURE CONTROL</span>
+            <h2>选择识别类型</h2>
+            <p>这个选择也会同步给物理按钮。拍照后先检查识别候选，再确认加入库存。</p>
+            <div class="segment-control camera-type-control" role="tablist" aria-label="摄像头识别类型">
+              <button class="segment active" data-camera-scan-type="food" role="tab">食物</button>
+              <button class="segment" data-camera-scan-type="barcode" role="tab">条码</button>
+              <button class="segment" data-camera-scan-type="receipt" role="tab">小票</button>
+              <button class="segment" data-camera-scan-type="expiry" role="tab">日期</button>
+            </div>
+            <div id="cameraExpiryBatchWrap" class="field-block hidden">
+              <label for="cameraExpiryBatch">这张日期属于哪件库存？</label>
+              <select id="cameraExpiryBatch"><option value="">请选择库存批次</option></select>
+            </div>
+            <button id="cameraCaptureButton" class="camera-shutter" type="button"><span></span><b>拍照并识别</b><small>也可按下物理按钮</small></button>
+            <div class="hardware-status-list">
+              <div><i id="cameraStatusDot"></i><span><b>USB 摄像头</b><small id="cameraStatusText">正在检查设备</small></span></div>
+              <div><i id="buttonStatusDot"></i><span><b>GPIO 拍照按钮</b><small id="buttonStatusText">正在检查 wiringOP</small></span></div>
+              <div><i id="captureStatusDot"></i><span><b>最近一次拍照</b><small id="lastCaptureText">尚未拍照</small></span></div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-scan" aria-labelledby="scanTitle">
+        <div class="page-heading compact">
+          <div><p class="kicker">SMART CAPTURE</p><h1 id="scanTitle">拍照识别</h1><p class="page-subtitle">先选择识别类型；机器只给候选，确认后才会写入库存。</p></div>
+        </div>
+        <div class="scan-layout">
+          <section class="panel capture-panel">
+            <div class="segment-control" role="tablist" aria-label="识别类型">
+              <button class="segment" data-scan-type="food" role="tab">食物拍照</button>
+              <button class="segment" data-scan-type="barcode" role="tab">条形码</button>
+              <button class="segment active" data-scan-type="receipt" role="tab">小票识别</button>
+              <button class="segment" data-scan-type="expiry" role="tab">包装日期</button>
+            </div>
+            <div id="expiryBatchWrap" class="field-block hidden">
+              <label for="expiryBatch">这张日期属于哪件库存？</label>
+              <select id="expiryBatch"><option value="">请选择库存批次</option></select>
+            </div>
+            <label class="camera-zone" for="scanFile">
+              <input id="scanFile" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+              <span class="camera-glyph">◎</span>
+              <strong id="cameraTitle">拍摄或选择购物小票</strong>
+              <small id="cameraHint">让文字占满画面，避免反光和手指遮挡</small>
+              <b>选择图片</b>
+            </label>
+            <div id="imagePreview" class="image-preview hidden"><img id="previewImg" alt="待识别图片"><div><strong id="previewName"></strong><span id="previewSize"></span></div></div>
+            <div class="capture-actions">
+              <button id="analyzeButton" class="primary-button" disabled>开始识别</button>
+              <button id="demoScanButton" class="outline-button">使用 receipt.jpg 示例</button>
+            </div>
+            <div class="privacy-note"><span>✓</span><p><b>本地优先处理</b><br>图片、库存与识别记录保存在这台设备上。</p></div>
+          </section>
+
+          <section class="panel result-panel" id="resultPanel">
+            <div id="resultEmpty" class="result-empty"><span>⌁</span><h2>识别结果会出现在这里</h2><p>你可以逐项修改，然后再确认入库。</p></div>
+            <div id="resultContent" class="hidden"></div>
+          </section>
+        </div>
+        <section class="panel history-panel">
+          <div class="section-heading"><div><span class="eyebrow">RECENT SCANS</span><h2>最近识别</h2></div><button class="text-button" id="refreshScans">刷新</button></div>
+          <div id="scanHistory" class="history-list"></div>
+        </section>
+      </section>
+
+      <section class="view" id="view-recipes" aria-labelledby="recipeTitle">
+        <div class="page-heading compact">
+          <div><p class="kicker">COOK SMARTER</p><h1 id="recipeTitle">今日食谱</h1><p class="page-subtitle">先排除过期食品，再按临期优先、人数和耗时推荐。</p></div>
+          <label class="servings-control">人数 <input id="servings" type="number" min="1" max="12" value="2"></label>
+        </div>
+        <div id="recipeList" class="recipe-list"></div>
+        <section class="panel logic-panel">
+          <span class="eyebrow">HOW IT WORKS</span><h2>推荐不是把整个冰箱直接丢给 AI</h2>
+          <div class="logic-flow"><span>可用库存</span><b>→</b><span>排除过期</span><b>→</b><span>临期优先</span><b>→</b><span>人数 / 时间</span><b>→</b><span>营养计算</span></div>
+        </section>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="移动端导航">
+      <button class="nav-item active" data-view="home"><span>⌂</span><b>今天</b></button>
+      <button class="nav-item" data-view="inventory"><span>▦</span><b>库存</b></button>
+      <button class="nav-item nav-scan" data-view="scan"><span>＋</span><b>识别</b></button>
+      <button class="nav-item" data-view="camera"><span>◉</span><b>摄像头</b></button>
+      <button class="nav-item" data-view="recipes"><span>♨</span><b>食谱</b></button>
+    </nav>
+  </div>
+
+  <div id="loadingOverlay" class="loading-overlay hidden" aria-live="polite"><div class="loader"></div><b id="loadingText">正在识别…</b></div>
+  <div id="toast" class="toast hidden" role="status"></div>
+  <dialog id="confirmDialog" class="confirm-dialog"><form method="dialog"><h3 id="dialogTitle">确认操作</h3><p id="dialogText"></p><div><button value="cancel" class="outline-button">取消</button><button value="confirm" class="danger-button">确认</button></div></form></dialog>
+</body>
+</html>

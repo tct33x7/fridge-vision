@@ -1,0 +1,28 @@
+[Unit]
+Description=GPIO button USB camera capture service
+After=multi-user.target
+
+[Service]
+Type=simple
+User=orangepi
+Group=orangepi
+SupplementaryGroups=video gpio
+StateDirectory=camera-capture
+StateDirectoryMode=0750
+# Copy the camera_system directory to /opt/camera-system, or change both paths.
+WorkingDirectory=/opt/camera-system
+ExecStart=/usr/bin/python3 /opt/camera-system/capture_service.py --host 127.0.0.1 --port 8001 --no-ocr --output-dir /var/lib/camera-capture/images --database /var/lib/camera-capture/catalog.sqlite3
+Restart=on-failure
+RestartSec=3
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/camera-capture
+
+[Install]
+WantedBy=multi-user.target
