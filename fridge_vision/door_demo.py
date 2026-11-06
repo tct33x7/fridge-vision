@@ -91,17 +91,22 @@ class Track:
     best_crop: np.ndarray | None = None
     age: int = 0
     crossed: bool = False
+    last_seen: float = 0.0
 
 
 class LineCounter:
     """物品中心点穿过虚拟线 → 事件。`axis` 为 y 时线是水平的，`in_dir` 指"放入"是往哪边走。"""
 
-    def __init__(self, axis: str, position: float, in_dir: str, min_age: int = 3) -> None:
+    def __init__(self, axis: str, position: float, in_dir: str, min_age: int = 3,
+                 min_gap: float = 1.5, stale_after: float = 0.6) -> None:
         self.axis = axis
         self.position = position
         self.in_dir = in_dir
         self.min_age = min_age
+        self.min_gap = min_gap          # 同一类别、同一方向两次事件的最小间隔（秒），防止轨迹 ID 跳变重复计数
+        self.stale_after = stale_after  # 轨迹消失超过这么久再出现，视为新轨迹，清空位置历史
         self.tracks: dict[int, Track] = {}
+        self.last_event: dict[tuple[str, str], float] = {}
 
     def line_px(self, w: int, h: int) -> int:
         return int(self.position * (h if self.axis == "y" else w))
@@ -114,7 +119,13 @@ class LineCounter:
         x1, y1, x2, y2 = box
         h, w = frame.shape[:2]
         cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+        now = time.time()
         tr = self.tracks.setdefault(tid, Track(label=label))
+        if tr.last_seen and now - tr.last_seen > self.stale_after:
+            tr.positions.clear()
+            tr.age = 0
+            tr.crossed = False
+        tr.last_seen = now
         tr.age += 1
         if conf > tr.best_conf:
             tr.best_conf = conf
@@ -129,10 +140,16 @@ class LineCounter:
         moved = "down" if (cur_side == 1) else "up"
         if self.axis == "x":
             moved = "right" if cur_side == 1 else "left"
-        return "in" if moved == self.in_dir else "out"
+        action = "in" if moved == self.in_dir else "out"
+        key = (tr.label, action)
+        if now - self.last_event.get(key, 0.0) < self.min_gap:
+            return None  # 刚记过同一件事，视为同一次动作的重复轨迹
+        self.last_event[key] = now
+        return action
 
     def reset(self) -> None:
         self.tracks.clear()
+        self.last_event.clear()
 
 
 # ---------------------------------------------------------------- 上报后端
@@ -199,6 +216,7 @@ def main() -> int:
     ap.add_argument("--line", type=float, default=0.5, help="虚拟线位置，占画面比例 0–1")
     ap.add_argument("--in-dir", default="up", choices=["up", "down", "left", "right"], help="往哪个方向过线算放入")
     ap.add_argument("--ignore", default="person,hand", help="不计数的类别，逗号分隔")
+    ap.add_argument("--min-gap", type=float, default=1.5, help="同一类别同一方向两次事件的最小间隔（秒）")
     ap.add_argument("--out", default=str(HERE / "runs" / "events.jsonl"))
     ap.add_argument("--keyframes", default=str(HERE / "runs" / "keyframes"))
     ap.add_argument("--vlm", action="store_true", help="过线后用大模型 API 确认名字（需 VLM_API_KEY）")
@@ -229,7 +247,7 @@ def main() -> int:
     read_failures = 0
 
     door = DoorDetector(args.trigger, delta=args.door_delta)
-    counter = LineCounter(args.axis, args.line, args.in_dir)
+    counter = LineCounter(args.axis, args.line, args.in_dir, min_gap=args.min_gap)
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     kf_dir = Path(args.keyframes)

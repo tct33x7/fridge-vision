@@ -32,7 +32,7 @@
  "chocolate": "巧克力",
  "corn": "玉米",
  "cucumber": "黄瓜",
- "cup": "杯子",
+ "cup": "杯装饮品",
  "donut": "甜甜圈",
  "dry grape": "葡萄干",
  "durian": "榴莲",
@@ -91,6 +91,6 @@
  "unit": "个",
  "vegetable": "蔬菜",
  "watermelon": "西瓜",
- "wine glass": "酒杯",
+ "wine glass": "杯装饮品",
  "yogurt": "酸奶"
 }
