@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_SPRITE = HERE.parent / "smart_fridge_demo" / "yolo" / "test food.jpg"
+DEFAULT_SPRITE = HERE / "samples" / "test_food.jpg"
 
 
 def main() -> None:

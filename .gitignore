@@ -12,19 +12,19 @@ __pycache__/
 
 # 本地密钥与环境（绝不提交）
 .env
-smart_fridge_demo/config/api_settings.json
+archive/smart_fridge_demo/config/api_settings.json
 
 # 运行数据（数据库、上传图片、备份）
-smart_fridge_demo/storage/*/*
-!smart_fridge_demo/storage/*/.gitkeep
+archive/smart_fridge_demo/storage/*/*
+!archive/smart_fridge_demo/storage/*/.gitkeep
 smart_fridge_app/runtime/
 smart_fridge_app/backups/
-camera_system/captures/
-camera_system/data/
+archive/camera_system/captures/
+archive/camera_system/data/
 
-# 模型权重：只跟踪当前使用的 food_best.onnx（10.7 MB），其余权重不入库
+# 模型权重：正本只有 fridge_vision/models/food_best.onnx（10.7 MB），其余 .onnx 不入库（archive 里是指向它的符号链接）
 *.onnx
-!smart_fridge_demo/yolo/food_best.onnx
+!fridge_vision/models/food_best.onnx
 *.pt
 
 # 压缩包与运行期上传

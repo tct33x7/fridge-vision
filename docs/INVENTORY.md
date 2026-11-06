@@ -7,16 +7,16 @@
 
 ```text
 核心   fridge_vision/                        门口追踪 demo：开门检测、YOLO+ByteTrack、过线、关键帧、VLM
+核心   fridge_vision/models/                 80 类食物模型权重 + 类别表（正本）
 核心   smart_fridge_app/                     库存后端 + 手机网页：批次、流水、首页、备份、23 个测试
-复用   smart_fridge_demo/yolo/               80 类食物模型权重 + 类别表
-复用   smart_fridge_demo/app/services/yolo_food_detector.py   纯 onnxruntime 推理（Jetson 上不装 ultralytics 时用）
-复用   smart_fridge_demo/app/services/food_classifier.py       80 类英文→中文别名表（已抽到 labels_zh.json）
-复用   smart_fridge_demo/app/services/deepseek_client.py       文本食谱生成（第二步之后可选）
-搁置   camera_system/                        按钮拍照 + Tesseract OCR 服务，被 door_demo 取代
-搁置   smart_fridge_demo/ 其余               条码、小票 OCR、包装日期 OCR、PWA 前端、Docker
-归档   hardware/                             扫码枪壳体 V1–V3（32 MB STL/STEP）
-归档   docs/reference/                       Orange Pi 手册、研究 PPT、截图
-归档   yolov11训练-onnx/                     训练产物，权重是指向 demo/yolo 的符号链接
+复用   archive/smart_fridge_demo/app/services/yolo_food_detector.py   纯 onnxruntime 推理（Jetson 上不装 ultralytics 时用）
+复用   archive/smart_fridge_demo/app/services/food_classifier.py      80 类英文→中文别名表（已抽到 labels_zh.json）
+复用   archive/smart_fridge_demo/app/services/deepseek_client.py      文本食谱生成（第二步之后可选）
+搁置   archive/camera_system/                按钮拍照 + Tesseract OCR 服务，被 door_demo 取代
+搁置   archive/smart_fridge_demo/ 其余       条码、小票 OCR、包装日期 OCR、PWA 前端、Docker
+归档   archive/hardware/                     扫码枪壳体 V1–V3（32 MB STL/STEP）
+归档   archive/reference/                    Orange Pi 手册、研究 PPT、截图
+归档   archive/yolov11训练-onnx/             训练产物，权重是指向 fridge_vision/models 的符号链接
 ```
 
 ## fridge_vision/ —— 核心
@@ -49,7 +49,7 @@
 
 缺的：`door_events` 表与接口、撤销逻辑、按类别默认保质期表（**全仓库没有现成的**，要新写）、首页卡片。
 
-## smart_fridge_demo/ —— 大部分搁置，几个文件复用
+## archive/smart_fridge_demo/ —— 大部分搁置，几个文件复用
 
 | 位置 | 作用 | 结论 |
 | --- | --- | --- |
@@ -64,26 +64,26 @@
 | `frontend/`（PWA）、`Dockerfile`、`docker-compose.yml`、`使用文档*.md`、`receipt*.jpg` | 手机上传式前端、云部署、文档、小票样图 | 搁置；Docker 文件留着以防又想上云 |
 | `config/api_settings.json` | 含真实 DeepSeek key，已 gitignore | 轮换后只走环境变量 |
 
-## camera_system/ —— 搁置
+## archive/camera_system/ —— 搁置
 
 `capture_service.py`（980 行，摄像头独占 + GPIO + MJPEG + 内置 HTTP 服务）、`recognition.py`（Tesseract OCR 分类提取）、
 `capture_repository.py`（SQLite + JSON sidecar）、`DATA_FORMAT.md`（拍摄记录契约）。新思路由 `door_demo.py` 直接读摄像头，
 不需要独立的拍照守护进程。值得借鉴的只有两点：原子写 JPEG + SHA-256 登记的做法（app 的 media_store 已有），以及
 `--max-frame-age` 拒绝旧帧的思路（网络流重连时可用）。
 
-## hardware/ —— 归档
+## archive/hardware/ —— 归档
 
 扫码枪壳体 V1–V3 的 OpenSCAD、CadQuery、STEP、STL、3MF，共 32 MB。新思路没有手持设备。以后如果要给冰箱顶上的相机和
 接收器做一个支架，可以复用 V3 的 CadQuery 参数化建模方式，但几何完全不同。
 
-## docs/reference/ 与 yolov11训练-onnx/ —— 归档
+## archive/reference/ 与 archive/yolov11训练-onnx/ —— 归档
 
 | 文件 | 结论 |
 | --- | --- |
 | `OrangePi_4_Pro_A733_User Manual_v1.4.pdf`（14 MB） | 不再需要，换成 Jetson Nano 的资料 |
 | `T-L研究素材.pptx` | 立项时的调研，讲思路时还能用 |
 | 4 张截图（7–8 月） | 早期界面/接线留档 |
-| `yolov11训练-onnx/class.txt`、`test_result.jpg`、`food_best.onnx`（符号链接） | 训练产物，权重以 demo/yolo 为准 |
+| `yolov11训练-onnx/class.txt`、`test_result.jpg`、`food_best.onnx`（符号链接） | 训练产物，权重以 fridge_vision/models 为准 |
 
 ## 新思路还缺什么（都不在现有资料里）
 
@@ -94,7 +94,9 @@
 5. Jetson 的 TensorRT 引擎、systemd 单元（第三步）
 6. 门口关键帧标注集与微调权重（之后）
 
-## 是否物理搬动目录
+## 目录已搬动（2026-11-06）
 
-现在只下结论、不搬文件：`hardware/`、`camera_system/`、`docs/reference/` 原地不动，`README.md` 顶部已注明方向变更。
-等第二步跑通、确认不会回头用条码和小票后，再把搁置和归档的目录移到 `archive/`，一次性改路径和文档。
+搁置和归档的目录已全部移入 `archive/`：`archive/smart_fridge_demo`、`archive/camera_system`、`archive/hardware`、
+`archive/reference`、`archive/yolov11训练-onnx`。模型权重和类别表的正本改在 `fridge_vision/models/`，archive 里原位置
+留的是指向它的符号链接；测试图在 `fridge_vision/samples/test_food.jpg`。根目录现在只剩 `fridge_vision/`、`smart_fridge_app/`、
+`docs/` 和 `archive/`。

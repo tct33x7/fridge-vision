@@ -1,3 +1,5 @@
+> 2026-11-06：方案已改为家用纯视觉，不再需要云部署。本文和 Docker 文件随 demo 一起归档在 `archive/smart_fridge_demo/`，留作以后参考。
+
 # 云端部署（smart_fridge_demo）
 
 云端只部署 `smart_fridge_demo`：它靠手机浏览器上传图片工作，不需要 USB 摄像头和 GPIO。`smart_fridge_app`
@@ -19,7 +21,7 @@ curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker $USER && newgr
 2. 把仓库放到主机上（有 GitHub 时 `git clone`，没有就 `scp -r` 整个 `smart_fridge_demo` 目录），然后：
 
 ```bash
-cd smart_fridge_demo && DEEPSEEK_API_KEY=sk-你的新密钥 docker compose up -d --build
+cd archive/smart_fridge_demo && DEEPSEEK_API_KEY=sk-你的新密钥 docker compose up -d --build
 ```
 
 3. 云厂商安全组放行 TCP 8000，手机打开 `http://主机IP:8000`，PWA 可"添加到主屏幕"。
@@ -71,7 +73,7 @@ sudo systemctl reload caddy
 
 ## 方案 B：Railway / Render / Fly.io（免运维，按量付费）
 
-三家都能直接识别仓库里的 `smart_fridge_demo/Dockerfile`。共同要点：
+三家都能直接识别仓库里的 `archive/smart_fridge_demo/Dockerfile`。共同要点：
 
 - 根目录设为 `smart_fridge_demo`；
 - 环境变量：`DEEPSEEK_API_KEY`、`SMART_FRIDGE_GPIO_BUTTON_ENABLED=false`、`SMART_FRIDGE_STORAGE_DIR=/data/storage`；
@@ -86,11 +88,11 @@ sudo systemctl reload caddy
 直接用项目自带脚本和 systemd 模板，和 Orange Pi 上的做法一样：
 
 ```bash
-cd smart_fridge_demo && ./install.sh && cp .env.example .env
+cd archive/smart_fridge_demo && ./install.sh && cp .env.example .env
 ```
 
 编辑 `.env` 填 `DEEPSEEK_API_KEY` 并把 `SMART_FRIDGE_GPIO_BUTTON_ENABLED` 改成 `false`，然后按
-[README 第 6 节](smart_fridge_demo/README.md) 安装 `smart-fridge.service`。
+[README 第 6 节](archive/smart_fridge_demo/README.md) 安装 `smart-fridge.service`。
 
 ## 部署后验收清单
 

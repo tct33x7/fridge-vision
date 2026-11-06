@@ -30,7 +30,7 @@ import cv2
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_MODEL = HERE.parent / "smart_fridge_demo" / "yolo" / "food_best.onnx"
+DEFAULT_MODEL = HERE / "models" / "food_best.onnx"
 LABELS_ZH = json.loads((HERE / "labels_zh.json").read_text(encoding="utf-8")) if (HERE / "labels_zh.json").exists() else {}
 
 

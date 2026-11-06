@@ -23,7 +23,7 @@
 | --- | --- | --- |
 | `fridge_vision/door_demo.py` | 开门检测、YOLO + ByteTrack、过线计数、关键帧、事件输出 | ✅ Mac 自检通过 |
 | Mac 环境 | `fridge_vision/.venv`：ultralytics 8.4、torch（MPS）、OpenCV、onnxruntime | ✅ |
-| 模型权重 | `smart_fridge_demo/yolo/food_best.onnx`（80 类食物，自训）；`yolo11n.pt`（COCO，自动下载） | ✅ |
+| 模型权重 | `fridge_vision/models/food_best.onnx`（80 类食物，自训）；`yolo11n.pt`（COCO，自动下载） | ✅ |
 | 中文类别表 | `fridge_vision/labels_zh.json`，94 条 | ✅ |
 | 库存后端 | `smart_fridge_app`（FastAPI + SQLite，23 个测试通过）；门事件接口尚未加 | ✍️ 阶段 2 |
 | Jetson 系统 | JetPack 4.6.x SD 卡镜像（Ubuntu 18.04） | 🛒 下载 |
@@ -66,11 +66,11 @@
 ```text
 用到      fridge_vision/                      门口追踪 demo（核心）
 用到      smart_fridge_app/                   库存后端 + 手机网页
-用到      smart_fridge_demo/yolo/             模型权重和类别表
-用到      smart_fridge_demo/app/services/yolo_food_detector.py   纯 onnxruntime 推理参考
-搁置      camera_system/                      按钮拍照服务，被 door_demo 取代
-搁置      smart_fridge_demo/ 其余             条码、小票、OCR、PWA、Docker
-归档      hardware/                           扫码枪壳体
+用到      fridge_vision/models/             模型权重和类别表
+用到      archive/smart_fridge_demo/app/services/yolo_food_detector.py   纯 onnxruntime 推理参考
+搁置      archive/camera_system/              按钮拍照服务，被 door_demo 取代
+搁置      archive/smart_fridge_demo/ 其余     条码、小票、OCR、PWA、Docker
+归档      archive/hardware/                   扫码枪壳体
 ```
 
 ## 7. 还需要你给的四个答案

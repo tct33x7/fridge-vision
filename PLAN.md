@@ -41,10 +41,10 @@
 | --- | --- |
 | `smart_fridge_app`（库存、流水、首页、备份、23 个测试） | **保留为后端主体**，新增"门事件"和自动流水接口 |
 | `camera_system`（摄像头独占、MJPEG、SQLite 索引） | **改造**为门事件关键帧服务，去掉 GPIO 按钮和 Tesseract OCR |
-| `smart_fridge_demo/app/services/yolo_food_detector.py` | **搬到** app 里，是识别核心 |
-| `smart_fridge_demo` 其余（条码、小票 OCR、包装日期 OCR、Open Food Facts、PWA 前端） | **停止开发**，目录保留供参考，Docker 文件作废 |
+| `archive/smart_fridge_demo/app/services/yolo_food_detector.py` | **搬到** app 里，是识别核心 |
+| `smart_fridge_demo` 其余（条码、小票 OCR、包装日期 OCR、Open Food Facts、PWA 前端） | **停止开发**，已移入 `archive/`，Docker 文件作废 |
 | `smart_fridge_demo` 的 DeepSeek 食谱 | 可选保留，只发文本库存清单，不发图 |
-| `hardware/` 扫码枪壳体 V1–V3 | **归档**，纯视觉方案不需要手持枪；以后可能需要一个冰箱内摄像头支架 |
+| `archive/hardware/` 扫码枪壳体 V1–V3 | **归档**，纯视觉方案不需要手持枪；以后可能需要一个冰箱内摄像头支架 |
 
 ## 三步走（家里实现）
 
@@ -113,4 +113,4 @@ Mac 退出，Jetson 接接收器，一台机器跑完。
 
 - 合并两份副本，补回丢失文件；git 仓库；两个 venv；app 23 个测试、camera_system 6 个测试通过
 - demo 的 YOLO 推理和 OCR 在 Mac 上验证可用（OCR 这条线按 v2 不再推进）
-- Docker 与云部署文件保留在 `smart_fridge_demo/`，v2 不再需要云
+- Docker 与云部署文件随 demo 归档在 `archive/smart_fridge_demo/`，v2 不再需要云
