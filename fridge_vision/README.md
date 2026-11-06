@@ -9,6 +9,20 @@
 cd fridge_vision && python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```
 
+## 接 Moertek 2.4G 摄像头
+
+接收器插上 Mac 后先找编号（内置摄像头是 0，接收器一般是 1）：
+
+```bash
+.venv/bin/python list_cameras.py
+```
+
+然后把编号传给 `--source`：
+
+```bash
+.venv/bin/python door_demo.py --source 1 --trigger manual --model yolo11n.pt
+```
+
 ## 跑 demo
 
 笔记本摄像头，按 `o` 模拟开门/关门（桌面上没有冰箱灯，自动检测不好触发）：
