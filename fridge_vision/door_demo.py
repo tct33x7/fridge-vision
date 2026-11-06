@@ -8,6 +8,8 @@
     python door_demo.py                       # 笔记本摄像头，自动开门检测
     python door_demo.py --trigger manual      # 按 o 键模拟开门/关门
     python door_demo.py --source clip.mp4 --trigger always --headless
+    python door_demo.py --source rtsp://user:pass@192.168.1.50:554/stream1   # 无线/网络摄像头
+    python door_demo.py --source http://192.168.1.66:8080/video               # 手机 IP Webcam 应用
     python door_demo.py --model yolo11n.pt    # 用 COCO 通用模型（瓶子、杯子、香蕉、苹果……）
     VLM_API_KEY=... python door_demo.py --vlm # 过线后把关键帧发给大模型确认名字
 
@@ -161,10 +163,19 @@ def main() -> int:
     ignore = {s.strip() for s in args.ignore.split(",") if s.strip()}
 
     source: int | str = int(args.source) if args.source.isdigit() else args.source
-    cap = cv2.VideoCapture(source)
+    is_stream = isinstance(source, str) and source.startswith(("rtsp://", "http://", "https://", "rtmp://"))
+
+    def open_source() -> cv2.VideoCapture:
+        cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG) if is_stream else cv2.VideoCapture(source)
+        if is_stream:
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 网络流只留最新一帧，降低延迟
+        return cap
+
+    cap = open_source()
     if not cap.isOpened():
         print(f"打不开视频源 {args.source}", file=sys.stderr)
         return 2
+    read_failures = 0
 
     door = DoorDetector(args.trigger, delta=args.door_delta)
     counter = LineCounter(args.axis, args.line, args.in_dir)
@@ -188,7 +199,17 @@ def main() -> int:
     while True:
         ok, frame = cap.read()
         if not ok:
-            break
+            if not is_stream:
+                break
+            read_failures += 1
+            if read_failures > 30:
+                print("网络流断开，重连…", flush=True)
+                cap.release()
+                time.sleep(2)
+                cap = open_source()
+                read_failures = 0
+            continue
+        read_failures = 0
         frame_idx += 1
         if args.max_frames and frame_idx > args.max_frames:
             break
