@@ -12,15 +12,18 @@
     python door_demo.py --source http://192.168.1.66:8080/video               # 手机 IP Webcam 应用
     python door_demo.py --model yolo11n.pt    # 用 COCO 通用模型（瓶子、杯子、香蕉、苹果……）
     VLM_API_KEY=... python door_demo.py --vlm # 过线后把关键帧发给大模型确认名字
+    python door_demo.py --post-url http://127.0.0.1:8000   # 过线事件连同关键帧上报库存后端
 
 按键（有窗口时）：q 退出，o 手动开/关门，l 切换过线方向。
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import sys
 import time
+import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -132,6 +135,53 @@ class LineCounter:
         self.tracks.clear()
 
 
+# ---------------------------------------------------------------- 上报后端
+class EventPoster:
+    """把过线事件连同关键帧 POST 给 smart_fridge_app 的 /api/v1/door-events。失败只打印，不影响本地记账。"""
+
+    def __init__(self, base_url: str, timeout: float = 5.0) -> None:
+        import httpx
+
+        self.url = base_url.rstrip("/") + "/api/v1/door-events"
+        self.client = httpx.Client(timeout=timeout)
+
+    def post(self, event: dict, crop: np.ndarray | None, stamp: datetime) -> dict:
+        payload = {
+            "session_id": event["session_id"],
+            "occurred_at": stamp.astimezone().isoformat(timespec="milliseconds"),
+            "action": event["action"],
+            "label": event["label"],
+            "label_zh": event["label_zh"],
+            "confidence": event["confidence"],
+            "count": 1,
+        }
+        vlm = event.get("vlm")
+        if isinstance(vlm, dict):
+            payload["vlm"] = vlm
+            try:
+                count = int(vlm.get("count") or 0)
+                if count > 0:
+                    payload["count"] = count
+            except (TypeError, ValueError):
+                pass
+        if crop is not None and crop.size:
+            ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            if ok:
+                payload["keyframe_base64"] = base64.b64encode(buf.tobytes()).decode()
+        try:
+            response = self.client.post(self.url, json=payload)
+        except Exception as exc:  # 后端不在线
+            print(f"    上报失败：{exc}", flush=True)
+            return {"ok": False, "error": str(exc)[:200]}
+        if response.status_code >= 300:
+            print(f"    上报被拒 {response.status_code}：{response.text[:160]}", flush=True)
+            return {"ok": False, "status": response.status_code, "error": response.text[:200]}
+        body = response.json()
+        lot = body.get("lot") or {}
+        print(f"    已入账 {body.get('status')}，批次余量 {lot.get('quantity')}", flush=True)
+        return {"ok": True, "event_id": body.get("id"), "status": body.get("status")}
+
+
 # ---------------------------------------------------------------- 主循环
 def zh(label: str) -> str:
     return LABELS_ZH.get(label, label)
@@ -152,6 +202,7 @@ def main() -> int:
     ap.add_argument("--out", default=str(HERE / "runs" / "events.jsonl"))
     ap.add_argument("--keyframes", default=str(HERE / "runs" / "keyframes"))
     ap.add_argument("--vlm", action="store_true", help="过线后用大模型 API 确认名字（需 VLM_API_KEY）")
+    ap.add_argument("--post-url", default="", help="smart_fridge_app 地址，例如 http://127.0.0.1:8000；设置后每次过线都上报")
     ap.add_argument("--headless", action="store_true", help="不开窗口（视频文件验证用）")
     ap.add_argument("--max-frames", type=int, default=0, help="最多处理多少帧，0 不限")
     args = ap.parse_args()
@@ -191,6 +242,8 @@ def main() -> int:
 
     recent: deque[str] = deque(maxlen=6)
     session_events: list[dict] = []
+    session_id = uuid.uuid4().hex
+    poster = EventPoster(args.post_url) if args.post_url else None
     was_open = door.open
     frame_idx = 0
     t_last = time.time()
@@ -219,6 +272,7 @@ def main() -> int:
         if is_open and not was_open:
             print(f"[{datetime.now():%H:%M:%S}] 开门", flush=True)
             session_events = []
+            session_id = uuid.uuid4().hex
         if not is_open and was_open:
             summary = "、".join(f"{'放入' if e['action']=='in' else '拿出'}{e['label_zh']}" for e in session_events) or "无变化"
             print(f"[{datetime.now():%H:%M:%S}] 关门：{summary}", flush=True)
@@ -253,6 +307,7 @@ def main() -> int:
                             cv2.imwrite(str(kf_dir / kf_name), tr.best_crop)
                         event = {
                             "time": stamp.isoformat(timespec="seconds"),
+                            "session_id": session_id,
                             "action": action,
                             "label": tr.label,
                             "label_zh": zh(tr.label),
@@ -265,13 +320,15 @@ def main() -> int:
                                 event["vlm"] = vlm.name_item(tr.best_crop)
                             except Exception as exc:  # API 失败不影响本地记账
                                 event["vlm_error"] = str(exc)[:200]
-                        with out_path.open("a", encoding="utf-8") as f:
-                            f.write(json.dumps(event, ensure_ascii=False) + "\n")
-                        session_events.append(event)
                         line = f"{'放入' if action == 'in' else '拿出'} {event['label_zh']} ({tr.best_conf:.2f})"
                         if "vlm" in event:
                             line += f" → 大模型: {event['vlm'].get('name')} x{event['vlm'].get('count')}"
                         print(f"[{stamp:%H:%M:%S}] {line}", flush=True)
+                        if poster is not None:
+                            event["posted"] = poster.post(event, tr.best_crop, stamp)
+                        with out_path.open("a", encoding="utf-8") as f:
+                            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+                        session_events.append(event)
                         recent.appendleft(f"{action.upper():3s} {tr.label}")
 
         now = time.time()

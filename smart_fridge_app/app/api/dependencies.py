@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import Request
 
 from app.database.connection import Database
+from app.repositories.door_events import DoorEventRepository
 from app.repositories.inventory import InventoryRepository
 from app.services.camera_gateway import CameraGateway
 from app.services.capture_library import CaptureLibrary
@@ -29,3 +30,7 @@ def capture_library(request: Request) -> CaptureLibrary:
 
 def media_store(request: Request) -> MediaStore:
     return request.app.state.media_store
+
+
+def door_events(request: Request) -> DoorEventRepository:
+    return request.app.state.door_events

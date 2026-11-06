@@ -10,9 +10,10 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
-from app.api import camera, dashboard, intake, inventory, media, profile
+from app.api import camera, dashboard, door_events, intake, inventory, media, profile
 from app.config import load_settings
 from app.database.connection import Database
+from app.repositories.door_events import DoorEventRepository
 from app.repositories.inventory import (
     ConflictError,
     InventoryRepository,
@@ -48,6 +49,7 @@ async def lifespan(app: FastAPI):
         app.state.media_store,
         app.state.repository,
     )
+    app.state.door_events = DoorEventRepository(app.state.repository, app.state.media_store)
     LOG.info("Smart Fridge ready; data=%s camera=%s", settings.data_dir, settings.camera_url)
     yield
 
@@ -118,4 +120,5 @@ app.include_router(camera.router)
 app.include_router(intake.router)
 app.include_router(media.router)
 app.include_router(profile.router)
+app.include_router(door_events.router)
 app.mount("/", StaticFiles(directory=settings.frontend_dir, html=True), name="frontend")

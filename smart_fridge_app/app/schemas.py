@@ -145,3 +145,46 @@ class ProfileUpdate(StrictModel):
 
 
 CameraAction = Literal["capture", "retry"]
+
+
+class DoorEventIn(StrictModel):
+    """One line-crossing reported by the door camera (fridge_vision/door_demo.py)."""
+
+    session_id: str = Field(min_length=1, max_length=64)
+    occurred_at: datetime | None = None
+    action: Literal["in", "out"]
+    label: str = Field(min_length=1, max_length=80)
+    label_zh: str | None = Field(default=None, max_length=80)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    count: float = Field(default=1, gt=0, le=1000)
+    vlm: dict[str, object] | None = None
+    keyframe_base64: str | None = Field(default=None, max_length=6_000_000)
+
+    @field_validator("occurred_at")
+    @classmethod
+    def normalize_occurred_at(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("occurred_at must include a timezone")
+        return value.astimezone(timezone.utc)
+
+    def occurred_at_iso(self) -> str:
+        moment = self.occurred_at or datetime.now(timezone.utc)
+        return moment.isoformat(timespec="milliseconds")
+
+
+class DoorEventCorrection(StrictModel):
+    label_zh: str | None = Field(default=None, min_length=1, max_length=80)
+    count: float | None = Field(default=None, gt=0, le=1000)
+
+    @model_validator(mode="after")
+    def require_a_change(self):
+        if self.label_zh is None and self.count is None:
+            raise ValueError("provide label_zh or count")
+        return self
+
+
+class ShelfLifeUpdate(StrictModel):
+    default_days: int = Field(gt=0, le=3650)
+    location_id: str | None = Field(default=None, min_length=1, max_length=64)

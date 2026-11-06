@@ -52,6 +52,24 @@ VLM_API_KEY=sk-xxx .venv/bin/python door_demo.py --trigger manual --model yolo11
 {"time": "2026-11-04T20:15:03", "action": "in", "label": "banana", "label_zh": "香蕉", "confidence": 0.91, "track_id": 3, "keyframe": "runs/keyframes/20261104_201503_3_in_banana.jpg", "vlm": {"name": "香蕉", "category": "水果", "count": 3, "confidence": 0.95}}
 ```
 
+## 上报库存后端（自动记账）
+
+另开一个终端启动后端：
+
+```bash
+cd smart_fridge_app && ./start.sh
+```
+
+然后给 demo 加 `--post-url`，每次过线都会把事件和关键帧发到 `/api/v1/door-events`，放入自动建批次、拿出自动扣减，
+手机打开 `http://<Mac IP>:8000` 能看到库存变化：
+
+```bash
+.venv/bin/python door_demo.py --trigger manual --model yolo11n.pt --post-url http://127.0.0.1:8000
+```
+
+后端不在线时只打印"上报失败"，本地 `events.jsonl` 照常记录。撤销一条：`POST /api/v1/door-events/{id}/undo`；
+改名字或数量：`PATCH /api/v1/door-events/{id}`，请求体 `{"label_zh": "鲜奶", "count": 2}`。
+
 ## 不用摄像头的自检
 
 ```bash
