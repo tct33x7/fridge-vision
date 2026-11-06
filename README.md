@@ -1,6 +1,6 @@
 # BX Project · 饮食均衡助手 / 食光冰箱
 
-> **2026-11-04 方向变更**：改为纯视觉家用方案——冰箱内摄像头 + Jetson Nano 本地 YOLO，开门触发关键帧自动记账，
+> **2026-11-04 方向变更**：改为纯视觉家用方案——门口摄像头 + N100 迷你主机本地 YOLO，开门触发追踪过线自动记账，
 > 不拍照、不扫码、不拍小票、不上云。项目计划书见 [docs/PROPOSAL.md](docs/PROPOSAL.md)，执行计划见 [PLAN.md](PLAN.md)，所需资料见 [docs/RESOURCES.md](docs/RESOURCES.md)，
 > 哪些旧资料还要用见 [docs/INVENTORY.md](docs/INVENTORY.md)；下面的子项目说明仍描述现状。
 

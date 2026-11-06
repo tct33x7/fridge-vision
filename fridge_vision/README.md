@@ -1,7 +1,7 @@
 # fridge_vision · 冰箱门口纯视觉记账
 
 摄像头看着冰箱门口，门一开就追踪手里的物品；物品穿过画面上的虚拟线，按方向判定"放入"或"拿出"，
-保存关键帧并写事件。先在 Mac 上跑通，再搬到 Jetson Nano。
+保存关键帧并写事件。先在 Mac 上跑通，再搬到 N100 迷你主机。
 
 ## 安装（Mac）
 
@@ -69,19 +69,18 @@ VLM_API_KEY=sk-xxx .venv/bin/python door_demo.py --trigger manual --model yolo11
 | `labels_zh.json` | 类别英文 → 中文（80 类食物模型 + COCO 里的食物/容器） |
 | `make_synthetic_video.py` | 生成自检视频 |
 
-## 搬到 Jetson Nano 4GB（老款）
+## 搬到 N100 迷你主机（第三步）
 
-老款 Nano 停在 JetPack 4.6（Ubuntu 18.04、Python 3.6），直接 `pip install ultralytics` 装不上。走 NVIDIA/Ultralytics 的
-JetPack 4 容器：
-
-```bash
-sudo docker run -it --runtime nvidia --ipc=host --device /dev/video0 -v $PWD:/work ultralytics/ultralytics:latest-jetson-jetpack4
-```
-
-容器里把模型导成 TensorRT FP16 引擎再跑同一个脚本：
+N100 装 Ubuntu 24.04 后和 Mac 完全一样：
 
 ```bash
-yolo export model=yolo11n.pt format=engine half=True imgsz=416 && python door_demo.py --model yolo11n.engine --imgsz 416 --headless
+sudo apt install -y python3-venv && cd fridge_vision && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```
 
-老款 Nano 上 416 分辨率的 n 模型大约十几帧每秒，追踪过线够用；不够就降到 320。
+帧率不足 10 fps 时把分辨率降到 320：
+
+```bash
+.venv/bin/python door_demo.py --source 1 --imgsz 320 --headless
+```
+
+再快一点可以把模型导成 OpenVINO 格式（`yolo export model=yolo11n.pt format=openvino`）后传给 `--model`。

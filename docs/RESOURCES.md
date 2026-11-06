@@ -1,20 +1,17 @@
 # 纯视觉冰箱方案 · 所需资料清单
 
-对应 [PLAN.md](../PLAN.md) v2（门口摄像头 + 老款 Jetson Nano 4GB + YOLO 追踪过线，自动记账）。
+对应 [PLAN.md](../PLAN.md) v2（门口摄像头 + N100 迷你主机 + YOLO 追踪过线，自动记账）。
 整理日期 2026-11-06。✅ 已有　🛒 要买　✍️ 要做　❓ 等你确认
 
 ## 1. 硬件
 
 | 物品 | 规格要点 | 状态 |
 | --- | --- | --- |
-| Jetson Nano 4GB（老款 B01） | 需 5V 4A DC 圆口电源并短接 J48 跳线；USB 供电跑 YOLO 会掉电重启 | ❓ 在手？电源规格？ |
-| microSD 卡 | 64 GB 起，A1/U3；JetPack 4.6 镜像约 20 GB，容器再占 6–8 GB | 🛒 |
-| 散热风扇 | 5V PWM 4cm，持续推理 Nano 会降频 | 🛒 |
-| 联网 | 老款 Nano 没有板载 Wi-Fi：要么网线，要么 Intel 8265 M.2 模块，要么免驱 USB 无线网卡 | ❓ 冰箱边有网口吗？ |
+| N100 / N150 迷你主机 | 8 GB 内存、256 GB SSD、内置 Wi-Fi、≥ 2 个 USB-A；装 Ubuntu 24.04。11-06 定为第三步主机，替代原定老款 Jetson Nano | 🛒 |
 | 摄像头 | **已选 Moertek 2.4G 无线款**（相机 → 2.4G → USB 接收器，接收器当 UVC 摄像头用，室内 20 m）。下单前核对：接收器免驱/UVC/支持 Mac 与 Linux；视角 ≥ 100°；延迟 < 300 ms；相机供电方式（电池还是电源线）；标称分辨率与帧率 | 🛒 已决定 |
 | 相机供电 | 无线只省视频线，相机仍要供电：优先选能接 USB 电源线的款，避免每天充电 | ❓ 看商品页 |
 | 摄像头支架 | 固定在冰箱顶部前沿朝下看门口，磁吸或 3M 胶；可 3D 打印 | ✍️ 阶段 3 |
-| 磁簧门磁开关（可选） | 常开型 + 杜邦线，接 Nano GPIO 做开门兜底 | 🛒 可选 |
+| 磁簧门磁开关（可选） | 常开型 + USB 串口小板（N100 没有 GPIO），做开门兜底 | 🛒 可选 |
 | 开发机 | 这台 Apple Silicon Mac，FaceTime 摄像头 | ✅ |
 
 ## 2. 软件与模型
@@ -26,8 +23,7 @@
 | 模型权重 | `fridge_vision/models/food_best.onnx`（80 类食物，自训）；`yolo11n.pt`（COCO，自动下载） | ✅ |
 | 中文类别表 | `fridge_vision/labels_zh.json`，94 条 | ✅ |
 | 库存后端 | `smart_fridge_app`（FastAPI + SQLite，23 个测试通过）；门事件接口尚未加 | ✍️ 阶段 2 |
-| Jetson 系统 | JetPack 4.6.x SD 卡镜像（Ubuntu 18.04） | 🛒 下载 |
-| Jetson 推理环境 | Docker 镜像 `ultralytics/ultralytics:latest-jetson-jetpack4`，容器内导 TensorRT FP16 引擎 | ✍️ 阶段 3 |
+| N100 系统与环境 | Ubuntu 24.04 + 和 Mac 同一份 `requirements.txt`；两个 systemd 单元 | ✍️ 阶段 3 |
 | 微调后的权重 | 用门口关键帧训练的 YOLO11n | ✍️ 阶段 4 |
 | 大模型命名（可选） | `fridge_vision/vlm.py`，OpenAI 兼容接口 | ✅ 代码就绪，缺 key |
 
@@ -48,16 +44,14 @@
 | --- | --- | --- |
 | 通义千问百炼 API key | `--vlm` 关键帧认名、数数 | ❓ 可选，要用就去开 |
 | DeepSeek API key | 食谱文本生成（现有 key 随压缩包流转过，建议轮换） | ✅ 有，建议轮换 |
-| NVIDIA 开发者账号 | 下载 JetPack 镜像 | 🛒 免费注册 |
 | GitHub | 仓库备份（本机无 `gh`，用 HTTPS + token） | ❓ 要不要 |
 
 ## 5. 参考资料
 
 | 资料 | 为什么需要 |
 | --- | --- |
-| Ultralytics 文档：NVIDIA Jetson 部署指南（JetPack 4 章节） | 老款 Nano 唯一可行的装法 |
+| Ultralytics 文档：CPU 推理与 OpenVINO 导出 | N100 上帧率不够时的提速路径 |
 | Ultralytics 文档：Track 模式 / ByteTrack 参数 | 调 `track_buffer`、`match_thresh` 解决漏跟 |
-| Jetson Nano B01 电源与 J48 跳线说明、40 针 GPIO 定义 | 供电和门磁开关接线 |
 | 仓库内：`PLAN.md`、`fridge_vision/README.md`、`smart_fridge_app/ARCHITECTURE.md` | 计划、demo 用法、后端数据模型 |
 | 不再需要：Orange Pi 手册、扫码枪 V1–V3、条码/小票 OCR 文档 | 方案已变，留档即可 |
 
@@ -75,7 +69,7 @@
 
 ## 7. 还需要你给的四个答案
 
-1. Jetson Nano 的电源是 DC 圆口 5V 4A 还是 Micro-USB？
-2. 冰箱旁边能拉网线吗，还是必须 Wi-Fi？
+1. ~~Jetson 电源~~ 已改选 N100 迷你主机，内置 Wi-Fi，无此问题。
+2. N100 和摄像头一起下单的日期。
 3. ~~摄像头是 USB 还是 CSI 排线？~~ 已选 Moertek 2.4G，到货后用 `fridge_vision/list_cameras.py` 找编号。
 4. 家里常买的 20–40 种食材清单。

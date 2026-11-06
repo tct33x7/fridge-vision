@@ -9,7 +9,7 @@
 核心   fridge_vision/                        门口追踪 demo：开门检测、YOLO+ByteTrack、过线、关键帧、VLM
 核心   fridge_vision/models/                 80 类食物模型权重 + 类别表（正本）
 核心   smart_fridge_app/                     库存后端 + 手机网页：批次、流水、首页、备份、23 个测试
-复用   archive/smart_fridge_demo/app/services/yolo_food_detector.py   纯 onnxruntime 推理（Jetson 上不装 ultralytics 时用）
+复用   archive/smart_fridge_demo/app/services/yolo_food_detector.py   纯 onnxruntime 推理（不想装 ultralytics 时用）
 复用   archive/smart_fridge_demo/app/services/food_classifier.py      80 类英文→中文别名表（已抽到 labels_zh.json）
 复用   archive/smart_fridge_demo/app/services/deepseek_client.py      文本食谱生成（第二步之后可选）
 搁置   archive/camera_system/                按钮拍照 + Tesseract OCR 服务，被 door_demo 取代
@@ -23,12 +23,12 @@
 
 | 文件 | 作用 | 新思路里的角色 |
 | --- | --- | --- |
-| `door_demo.py` | 开门检测（亮度跳变 / 手动 / 常开）、`model.track` + ByteTrack、虚拟线过线判放入拿出、关键帧裁图、`events.jsonl`、网络流重连 | 第一、二步的主程序；第三步原样搬到 Jetson，换 `.engine` 模型 |
+| `door_demo.py` | 开门检测（亮度跳变 / 手动 / 常开）、`model.track` + ByteTrack、虚拟线过线判放入拿出、关键帧裁图、`events.jsonl`、网络流重连 | 第一、二步的主程序；第三步原样搬到 N100 |
 | `vlm.py` | OpenAI 兼容多模态接口，把关键帧发给大模型要 `{name, category, count, confidence}` | 可选，认名兜底 |
 | `labels_zh.json` | 94 条英文类别 → 中文 | 事件中文名；以后微调后的类别要同步加 |
 | `list_cameras.py` | 列出可用摄像头编号 | 接收器插上后找 `--source` |
 | `make_synthetic_video.py` | 合成"开门 → 放入香蕉 → 拿出香蕉 → 关门"视频 | 回归测试，改过线逻辑后必跑 |
-| `requirements.txt` | ultralytics、opencv、httpx、onnxruntime | Mac 环境；Jetson 走容器不用它 |
+| `requirements.txt` | ultralytics、opencv、httpx、onnxruntime | Mac 和 N100 共用 |
 
 缺的：把事件 POST 到后端的 `--post-url`；记录"一次开关门"为一个会话的汇总事件；参数文件化（线位置、阈值）。
 
@@ -41,10 +41,10 @@
 | `app/api/inventory.py`、`dashboard.py`、`profile.py` | 库存增删查、首页聚合、健康、个人设置 | 直接复用 |
 | `app/api/media.py`、`services/media_store.py` | 应用自有 JPEG 原子写入、SHA-256、按 capture ID 出图 | 直接复用：关键帧当 `media_assets(source='camera')` 存进去做证据 |
 | `app/api/intake.py`、`api/camera.py`、`services/camera_gateway.py`、`services/capture_library.py` | 拍照会话、8001 摄像头代理、MJPEG | **搁置**：新思路没有"拍照会话"；路由先留着不删，首页入口隐藏 |
-| `app/tasks/backup.py` | 数据库 + 引用图片一致性备份包 | 直接复用；第三步从 Mac 迁 Jetson 就靠它 |
+| `app/tasks/backup.py` | 数据库 + 引用图片一致性备份包 | 直接复用；第三步从 Mac 迁 N100 就靠它 |
 | `frontend/index.html`、`app.js`、`styles.css` | 首页按真实数据显隐、库存页、图库、设置、拍照对话框 | 复用骨架；新增"刚才的变化"卡片 + 撤销；拍照对话框和相机预览隐藏 |
 | `tests/`（23 个） | 迁移、库存流水、媒体契约、会话、餐食、离线相机 | 保留做回归；新增门事件测试 |
-| `deploy/smart-fridge.service.example`、`install.sh`、`start.sh` | systemd、安装、启动 | 第三步 Jetson 上直接用，改路径 |
+| `deploy/smart-fridge.service.example`、`install.sh`、`start.sh` | systemd、安装、启动 | 第三步 N100 上直接用，改路径 |
 | `docs/RESEARCH_AND_DECISIONS.md`、`ARCHITECTURE.md` | 为什么这样设计、数据所有权、备份边界 | 继续有效，只有"摄像头 8001"那部分过时 |
 
 缺的：`door_events` 表与接口、撤销逻辑、按类别默认保质期表（**全仓库没有现成的**，要新写）、首页卡片。
@@ -53,9 +53,9 @@
 
 | 位置 | 作用 | 结论 |
 | --- | --- | --- |
-| `yolo/food_best.onnx`、`classes.txt` | 自训 80 类 YOLO11 权重（10.7 MB）和类别表 | **复用**：door_demo 默认模型；Jetson 上导 TensorRT 的源 |
+| `yolo/food_best.onnx`、`classes.txt` | 自训 80 类 YOLO11 权重（10.7 MB）和类别表 | **复用**：door_demo 默认模型 |
 | `yolo/food_best.previous.onnx`、`test food.jpg` | 旧权重、测试图 | 留着，不入库（`.gitignore` 已排除旧权重） |
-| `app/services/yolo_food_detector.py` | letterbox、onnxruntime CPU 推理、NMS，不依赖 ultralytics | **复用**：Jetson 容器装不上时的备选推理路径 |
+| `app/services/yolo_food_detector.py` | letterbox、onnxruntime CPU 推理、NMS，不依赖 ultralytics | **复用**：不想装 ultralytics 时的轻量推理路径 |
 | `app/services/food_classifier.py` | 80 类英文→中文别名、demo 固定结果 | 别名表已抽成 `labels_zh.json`；其余不用 |
 | `app/services/deepseek_client.py`、`recipe_service.py` | DeepSeek 结构化食谱 + 本地规则降级 | **可复用**（之后阶段），只发文本库存清单 |
 | `app/services/nutrition_service.py` | 库存营养汇总、每日参考值 | 可参考，app 里已有自己的营养逻辑 |
@@ -80,7 +80,7 @@
 
 | 文件 | 结论 |
 | --- | --- |
-| `OrangePi_4_Pro_A733_User Manual_v1.4.pdf`（14 MB） | 不再需要，换成 Jetson Nano 的资料 |
+| `OrangePi_4_Pro_A733_User Manual_v1.4.pdf`（14 MB） | 不再需要，主机已改为 N100 迷你主机 |
 | `T-L研究素材.pptx` | 立项时的调研，讲思路时还能用 |
 | 4 张截图（7–8 月） | 早期界面/接线留档 |
 | `yolov11训练-onnx/class.txt`、`test_result.jpg`、`food_best.onnx`（符号链接） | 训练产物，权重以 fridge_vision/models 为准 |
@@ -91,7 +91,7 @@
 2. 首页"刚才的变化"卡片（2.4）
 3. 按类别默认保质期表（2.5），全仓库没有，要结合你家常买清单新写
 4. `door_demo.py --post-url`，以及把一次开关门汇总成一条会话记录
-5. Jetson 的 TensorRT 引擎、systemd 单元（第三步）
+5. N100 上的 systemd 单元与安装脚本（第三步）
 6. 门口关键帧标注集与微调权重（之后）
 
 ## 目录已搬动（2026-11-06）
