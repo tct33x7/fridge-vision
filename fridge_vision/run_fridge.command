@@ -5,7 +5,8 @@ cd "$(dirname "$0")"
 mkdir -p runs
 DELTA="${DELTA:-25}"
 IN_DIR="${IN_DIR:-left}"   # 画面里冰箱内部在左边就是 left，在右边改 right（运行中按 l 也能切）
-echo "实景模式：开门自动触发；l 切换放入方向；o 可手动开/关门；q 退出。阈值 DELTA=$DELTA，放入方向=$IN_DIR"
-.venv/bin/python door_demo.py --trigger auto --door-delta "$DELTA" --axis x --line 0.5 --in-dir "$IN_DIR" \
+SOURCE="${SOURCE:-0}"      # 0=本机摄像头；iPad/手机网络摄像头填流地址，如 http://192.168.10.50:8081/video
+echo "实景模式：开门自动触发；l 切换放入方向；o 可手动开/关门；q 退出。视频源=$SOURCE 阈值 DELTA=$DELTA 放入方向=$IN_DIR"
+.venv/bin/python door_demo.py --source "$SOURCE" --trigger auto --door-delta "$DELTA" --axis x --line 0.5 --in-dir "$IN_DIR" \
   --model yolo11n.pt --post-url http://127.0.0.1:8000 --out runs/fridge_events.jsonl --keyframes runs/fridge_keyframes "$@" 2>&1 | tee runs/last_run.log
 echo "（窗口可以关闭）"
