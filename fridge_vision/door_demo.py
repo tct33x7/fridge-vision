@@ -51,6 +51,7 @@ class DoorDetector:
         self.confirm = confirm
         self.open = mode == "always"
         self.baseline: float | None = None
+        self.brightness: float = 0.0
         self._streak = 0
 
     def update(self, frame: np.ndarray) -> bool:
@@ -58,6 +59,7 @@ class DoorDetector:
             return self.open
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         brightness = float(gray.mean())
+        self.brightness = brightness
         if self.baseline is None:
             self.baseline = brightness
             return self.open
@@ -360,6 +362,9 @@ def main() -> int:
             else:
                 cv2.line(frame, (lp, 0), (lp, h), (255, 200, 0), 2)
             status = f"DOOR {'OPEN' if is_open else 'closed'}  {fps:4.1f} fps  in={args.in_dir}"
+            if door.mode == "auto":
+                base = door.baseline if door.baseline is not None else 0.0
+                status += f"  lum={door.brightness:.0f} base={base:.0f} +{args.door_delta:.0f}"
             cv2.putText(frame, status, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255) if is_open else (180, 180, 180), 2)
             for i, line in enumerate(recent):
                 cv2.putText(frame, line, (10, 52 + 22 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
