@@ -2,7 +2,7 @@
 
 > **2026-11-04 方向变更**：改为纯视觉家用方案——门口摄像头 + N100 迷你主机本地 YOLO，开门触发追踪过线自动记账，
 > 不拍照、不扫码、不拍小票、不上云。项目计划书见 [docs/PROPOSAL.md](docs/PROPOSAL.md)，执行计划见 [PLAN.md](PLAN.md)，所需资料见 [docs/RESOURCES.md](docs/RESOURCES.md)，
-> 哪些旧资料还要用见 [docs/INVENTORY.md](docs/INVENTORY.md)；下面的子项目说明仍描述现状。
+> 哪些旧资料还要用见 [docs/INVENTORY.md](docs/INVENTORY.md)，11-06 的全面复盘与建议见 [docs/REVIEW.md](docs/REVIEW.md)；下面的子项目说明仍描述现状。
 
 一个"拍照识别 → 人工确认 → 入库 → 营养与食谱"的本地优先食品库存系统，目标设备是 Orange Pi 4 Pro +
 USB 摄像头 + 手持扫码枪，手机或触摸屏通过浏览器使用。
