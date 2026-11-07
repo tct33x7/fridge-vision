@@ -220,6 +220,7 @@ def main() -> int:
     closed_sessions = 0
     t0 = time.time()
     kernel = np.ones((3, 3), np.uint8)
+    was_open = False  # 上一帧结束时的门状态；按 o 会在帧末改 door.open，所以不能在帧首读 door.open
 
     print(f"录制目录 {root}；源 {args.source}；触发 {args.trigger}；模型 {args.model or '无'}", flush=True)
     while True:
@@ -233,7 +234,6 @@ def main() -> int:
             break
         now = time.time()
         h, w = frame.shape[:2]
-        was_open = door.open
         is_open = door.update(frame, now)
 
         if is_open and not was_open:
@@ -246,6 +246,7 @@ def main() -> int:
             closed_sessions += 1
             print(f"[{datetime.now():%H:%M:%S}] 关门（{door.last_reason}）→ 已保存 {path.name}：{session.frames} 帧，{len(session.keyframes)} 张关键帧", flush=True)
             session = None
+        was_open = is_open
 
         motion = 0.0
         cx = 0.5
