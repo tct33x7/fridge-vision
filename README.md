@@ -86,14 +86,14 @@ DEEPSEEK_API_KEY=sk-xxx docker compose -f archive/smart_fridge_demo/docker-compo
 - 任务用 GitHub Issues 记，一件事一个 issue。
 - 每台机器自己建虚拟环境（见上面"快速开始"），`.venv` 不进仓库。
 
-首次推送（本机已装 GitHub CLI）：
+首次推送（GitHub CLI 已装在 ~/.local/bin，新开的终端里直接用 gh 也行）：
 
 ```bash
-gh auth login --web
+~/.local/bin/gh auth login --web
 ```
 
 ```bash
-gh repo create fridge-vision --private --source=. --remote=origin --push
+~/.local/bin/gh repo create fridge-vision --private --source=. --remote=origin --push
 ```
 
 ## 仓库约定
