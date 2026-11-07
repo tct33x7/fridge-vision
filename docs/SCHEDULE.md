@@ -34,7 +34,7 @@
 | --- | --- | --- |
 | 第 1 小时 | 给老师看 `summary.md` 和每个会话的 `contact.jpg`；讨论三个数字说明了什么；定架构：类别无关过线 + 大模型认名，YOLO 退为辅助 | 一页决定记录（写进 `docs/DECISIONS.md`） |
 | 第 2–3 小时 | 用大模型给昨晚全部关键帧认名，和真值比，得到"认名正确率"；失败的关键帧分类（看不清 / 遮挡 / 不在画面 / 认错）。脚本已备好：`export VLM_API_KEY=...` 后 `.venv/bin/python name_keyframes.py --dry-run` 先看会发多少张，再去掉 `--dry-run` 跑；结果在 `runs/sessions/naming_summary.md`，末尾的失败表留了"人工分类"一列 | 第三个数字 + 失败分类表 |
-| 第 4 小时 | 新链路：关门后离线分析一段录像 → 方向 → 认名 → 写入库存后端 → 手机页面显示 | 端到端跑通一次 |
+| 第 4 小时 | 新链路：关门后离线分析一段录像 → 方向 → 认名 → 写入库存后端 → 手机页面显示。脚本已备好：先 `open ~/Projects/bx-project/smart_fridge_app/run_backend.command` 起后端，再 `cd ~/Projects/bx-project/fridge_vision && .venv/bin/python process_session.py --dry-run` 看切出的动作和方向（`--fridge-side left/right` 按画面里冰箱在哪边），对了再加 `--post-url http://127.0.0.1:8000` 真上报；手机打开后端地址看库存清单 | 端到端跑通一次 |
 | 第 5–6 小时 | 你写报告前三节（问题、装置、测量方法与结果），自己的话；从 contact 图里挑失败案例做图集 | `docs/report/` 初稿 1–3 节 |
 | 第 7 小时 | 用手机演示一遍完整流程，录屏备用 | 一段原始录屏 |
 | 第 8 小时 | 和老师定下周三件事、下周末目标；N100 是否要装由老师定 | 更新本文件 |
