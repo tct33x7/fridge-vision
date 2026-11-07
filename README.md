@@ -76,6 +76,26 @@ DEEPSEEK_API_KEY=sk-xxx docker compose -f archive/smart_fridge_demo/docker-compo
 - 数据库、上传图、运行目录、备份都不入库（见 [`.gitignore`](.gitignore)）。
 - 两个应用都没有登录鉴权，只适合可信局域网。公网部署前必须加访问口令，DEPLOY.md 给了最省事的做法。
 
+## 协作（GitHub）
+
+本仓库在 GitHub 上是**私有**的（家里的录像和截图不公开）。老师和同学作为协作者加入。
+
+- `main` 随时可运行。改代码走分支 + Pull Request，哪怕只有自己一个人改，也留下记录；改文档可以直接提交到 `main`。
+- 提交前 `git pull`，提交信息写清楚改了什么、为什么。
+- `fridge_vision/runs/`（录像、关键帧、事件）永远不进仓库，已在 `.gitignore`。报告要用的失败案例图，挑好、确认没有人脸后放进 `docs/report/figures/`。
+- 任务用 GitHub Issues 记，一件事一个 issue。
+- 每台机器自己建虚拟环境（见上面"快速开始"），`.venv` 不进仓库。
+
+首次推送（本机已装 GitHub CLI）：
+
+```bash
+gh auth login --web
+```
+
+```bash
+gh repo create fridge-vision --private --source=. --remote=origin --push
+```
+
 ## 仓库约定
 
 - 一个 git 仓库管全部子项目，`main` 分支；提交前确认 `git status` 没有 `.env`、`api_settings.json`、`*.db`。
