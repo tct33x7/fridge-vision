@@ -18,8 +18,10 @@ from app.config import (
     CAMERA_WIDTH,
     COUNTER_CONFIDENCE,
     COUNTER_ENABLED,
+    COUNTER_ENGINE,
     COUNTER_IMGSZ,
     COUNTER_MODEL,
+    COUNTER_NPU_MODEL,
     STORAGE_DIR,
 )
 from app.database.connection import database
@@ -119,6 +121,7 @@ class CounterService:
         self.line: tuple[float, float, float, float] | None = self._load_line()
         self.line_epoch = 0
         self.conf = COUNTER_CONFIDENCE
+        self.engine_name = "未加载"
         self.status_text = "未启动"
         self.inference_fps = 0.0
         self.n_tracks = 0
@@ -219,27 +222,82 @@ class CounterService:
 
     # ---------------- 工作线程 ----------------
 
-    def _worker(self) -> None:
+    def _init_engine(self):
+        """构建 detect(frame) -> [(tid, cls_name, x1, y1, x2, y2), ...]; 失败返回 None"""
+        # ---- NPU 引擎 (香橙派 VIPLite + yolov5.nb + 轻量 ByteTrack) ----
+        if COUNTER_ENGINE in ("npu", "auto"):
+            try:
+                from app.services.bytetrack_lite import ByteTrackLite
+                from app.services.npu_yolov5 import COCO_CLASSES, NpuYolov5
+
+                det = NpuYolov5(COUNTER_NPU_MODEL)
+                tracker = ByteTrackLite()
+                det.infer(np.zeros((self.height, self.width, 3), "uint8"))  # 预热
+                self.engine_name = "NPU yolov5"
+
+                def detect_npu(frame):
+                    det.conf_threshold = max(0.10, self.conf * 0.45)  # 低分检测交给二级关联
+                    tracker.high_conf = self.conf
+                    dets = det.infer(frame)
+                    trk = tracker.update(
+                        [(x1, y1, x2, y2, conf, cid) for x1, y1, x2, y2, conf, cid, _ in dets]
+                    )
+                    return [
+                        (tid, COCO_CLASSES[cls_id], x1, y1, x2, y2)
+                        for tid, cls_id, x1, y1, x2, y2, _ in trk
+                    ]
+
+                return detect_npu
+            except Exception as exc:
+                if COUNTER_ENGINE == "npu":
+                    self._set_status(f"NPU 引擎初始化失败：{exc}", error=True)
+                    return None
+                print(f"[counter] NPU 引擎不可用，回退 CPU：{exc}", flush=True)
+
+        # ---- CPU 引擎 (ultralytics yolo11s + ByteTrack, 原有逻辑) ----
         try:
             from ultralytics import YOLO
         except ImportError as exc:
             self._set_status(f"未安装 ultralytics，无法计数：{exc}", error=True)
-            return
+            return None
         try:
             model = YOLO(self.model_path)
         except Exception as exc:
             self._set_status(f"计数模型加载失败（{self.model_path}）：{exc}", error=True)
-            return
-
-        device = "cpu"
+            return None
         self._set_status("模型已加载，正在预热")
         try:
             model.predict(
                 np.zeros((self.height, self.width, 3), "uint8"),
-                device=device, verbose=False, imgsz=self.imgsz,
+                device="cpu", verbose=False, imgsz=self.imgsz,
             )
         except Exception:
             pass
+        self.engine_name = f"CPU {self.model_path}"
+
+        def detect_cpu(frame):
+            results = model.track(
+                frame, persist=True, tracker="bytetrack.yaml",
+                conf=self.conf, imgsz=self.imgsz, device="cpu",
+                verbose=False,
+            )
+            r = results[0]
+            if r.boxes is None or r.boxes.id is None:
+                return []
+            boxes = r.boxes.xyxy.cpu().numpy()
+            ids = r.boxes.id.int().cpu().numpy()
+            clss = r.boxes.cls.int().cpu().numpy()
+            return [
+                (int(tid), model.names[int(cid)], *[float(v) for v in box])
+                for box, tid, cid in zip(boxes, ids, clss)
+            ]
+
+        return detect_cpu
+
+    def _worker(self) -> None:
+        detect = self._init_engine()
+        if detect is None:
+            return
 
         tracks: dict[int, dict[str, Any]] = {}
         frame_no = 0
@@ -250,7 +308,9 @@ class CounterService:
             if capture is None:
                 self._stop_event.wait(3)
                 continue
-            self._set_status(f"摄像头 {self.device} 计数运行中")
+            self._set_status(
+                f"摄像头 {self.device} 计数运行中（{self.engine_name}）"
+            )
             with self._condition:
                 self.frame_w = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)) or self.width
                 self.frame_h = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)) or self.height
@@ -261,18 +321,14 @@ class CounterService:
                     self._stop_event.wait(0.3)
                     continue
                 frame_no += 1
+                now_str = time.strftime("%H:%M:%S")
+
                 try:
-                    results = model.track(
-                        frame, persist=True, tracker="bytetrack.yaml",
-                        conf=self.conf, imgsz=self.imgsz, device=device,
-                        verbose=False,
-                    )
+                    frame_tracks = detect(frame)
                 except Exception as exc:
                     self._set_status(f"推理失败：{exc}", error=True)
                     self._stop_event.wait(1)
                     continue
-                r = results[0]
-                now_str = time.strftime("%H:%M:%S")
 
                 with self._line_lock:
                     line_norm = self.line
@@ -290,64 +346,9 @@ class CounterService:
                         nx, ny = -uy, ux  # 左法线 = +1 侧
                         gate = (ax, ay, bx, by, ux, uy, nx, ny)
 
-                seen_ids = set()
-                if r.boxes is not None and r.boxes.id is not None:
-                    boxes = r.boxes.xyxy.cpu().numpy()
-                    ids = r.boxes.id.int().cpu().numpy()
-                    clss = r.boxes.cls.int().cpu().numpy()
-                    names = model.names
-
-                    for (x1, y1, x2, y2), tid, cid in zip(boxes, ids, clss):
-                        tid = int(tid)
-                        if names[cid] in EXCLUDE_CLASSES:
-                            continue
-                        seen_ids.add(tid)
-                        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-                        t = tracks.get(tid)
-                        if t is None:
-                            t = {"cls": names[cid], "trail": deque(maxlen=TRAIL_LEN),
-                                 "side": 0, "last_seen": frame_no, "line_epoch": -1}
-                            tracks[tid] = t
-                        t["last_seen"] = frame_no
-                        t["trail"].append((cx, cy))
-
-                        # ---- 方向计数 ----
-                        if gate is not None:
-                            g_ax, g_ay, _, _, _, _, nx, ny = gate
-                            proj = (cx - g_ax) * nx + (cy - g_ay) * ny
-                            side = 1 if proj > HYSTERESIS else (-1 if proj < -HYSTERESIS else 0)
-                            if t["line_epoch"] != line_epoch:
-                                t["side"] = side if side != 0 else t["side"]
-                                t["line_epoch"] = line_epoch
-                            elif side != 0 and side != t["side"] and t["side"] != 0:
-                                delta = 1 if side > t["side"] else -1
-                                cls_name = t["cls"]
-                                with self._condition:
-                                    self.counts[cls_name] += delta
-                                    self.events.append(
-                                        {"t": now_str, "cls": cls_name, "delta": delta}
-                                    )
-                                self._persist_event(cls_name, delta)
-                                t["side"] = side
-                            elif side != 0:
-                                t["side"] = side
-
-                        # ---- 绘制 ----
-                        color = PALETTE[cid % len(PALETTE)]
-                        ix1, iy1, ix2, iy2 = int(x1), int(y1), int(x2), int(y2)
-                        cv2.rectangle(frame, (ix1, iy1), (ix2, iy2), color, 2)
-                        label = f"{zh_name(t['cls'])} #{tid}"
-                        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-                        ty = max(iy1, th + 6)
-                        cv2.rectangle(frame, (ix1, ty - th - 6), (ix1 + tw + 4, ty), color, -1)
-                        cv2.putText(frame, label, (ix1 + 2, ty - 4),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
-                        if len(t["trail"]) > 1:
-                            pts = np.array(t["trail"], np.int32).reshape(-1, 1, 2)
-                            cv2.polylines(frame, [pts], False, (255, 220, 80), 2, cv2.LINE_AA)
-                    self.n_tracks = len(seen_ids)
-                else:
-                    self.n_tracks = 0
+                self.n_tracks = self._ingest_tracks(
+                    frame, frame_tracks, tracks, frame_no, now_str, gate, line_epoch
+                )
 
                 stale = [k for k, v in tracks.items() if frame_no - v["last_seen"] > TRACK_TIMEOUT]
                 for k in stale:
@@ -389,6 +390,59 @@ class CounterService:
 
             self._release_capture()
 
+    def _ingest_tracks(self, frame, frame_tracks, tracks, frame_no, now_str,
+                       gate, line_epoch):
+        """轨迹入库/计数/绘制, 返回本轮可见轨迹数"""
+        seen_ids = set()
+        for tid, cls_name, x1, y1, x2, y2 in frame_tracks:
+            if cls_name in EXCLUDE_CLASSES:
+                continue
+            seen_ids.add(tid)
+            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+            t = tracks.get(tid)
+            if t is None:
+                t = {"cls": cls_name, "trail": deque(maxlen=TRAIL_LEN),
+                     "side": 0, "last_seen": frame_no, "line_epoch": -1}
+                tracks[tid] = t
+            t["last_seen"] = frame_no
+            t["trail"].append((cx, cy))
+
+            # ---- 方向计数 ----
+            if gate is not None:
+                g_ax, g_ay, _, _, _, _, nx, ny = gate
+                proj = (cx - g_ax) * nx + (cy - g_ay) * ny
+                side = 1 if proj > HYSTERESIS else (-1 if proj < -HYSTERESIS else 0)
+                if t["line_epoch"] != line_epoch:
+                    t["side"] = side if side != 0 else t["side"]
+                    t["line_epoch"] = line_epoch
+                elif side != 0 and side != t["side"] and t["side"] != 0:
+                    delta = 1 if side > t["side"] else -1
+                    cls = t["cls"]
+                    with self._condition:
+                        self.counts[cls] += delta
+                        self.events.append(
+                            {"t": now_str, "cls": cls, "delta": delta}
+                        )
+                    self._persist_event(cls, delta)
+                    t["side"] = side
+                elif side != 0:
+                    t["side"] = side
+
+            # ---- 绘制 ----
+            color = PALETTE[tid % len(PALETTE)]
+            ix1, iy1, ix2, iy2 = int(x1), int(y1), int(x2), int(y2)
+            cv2.rectangle(frame, (ix1, iy1), (ix2, iy2), color, 2)
+            label = f"{zh_name(t['cls'])} #{tid}"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+            ty = max(iy1, th + 6)
+            cv2.rectangle(frame, (ix1, ty - th - 6), (ix1 + tw + 4, ty), color, -1)
+            cv2.putText(frame, label, (ix1 + 2, ty - 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+            if len(t["trail"]) > 1:
+                pts = np.array(t["trail"], np.int32).reshape(-1, 1, 2)
+                cv2.polylines(frame, [pts], False, (255, 220, 80), 2, cv2.LINE_AA)
+        return len(seen_ids)
+
     def _set_status(self, text: str, error: bool = False) -> None:
         self.status_text = text
         self.error = text if error else None
@@ -424,6 +478,7 @@ class CounterService:
             "running": self.running,
             "paused": paused or not self.running,
             "status": self.status_text,
+            "engine": self.engine_name,
             "error": self.error,
             "device": self.device,
             "fps": round(self.inference_fps, 1),
