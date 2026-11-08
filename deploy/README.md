@@ -1,24 +1,56 @@
-# deploy · 在 OrangePi 4 Pro 上跑起来
+# deploy · OrangePi 4 Pro
 
-v4 的主机是 OrangePi 4 Pro（[ARCHITECTURE §7](../docs/ARCHITECTURE.md)）。Mac 继续做开发机，同一套代码复制过来就能跑。
-这里先放装机清单，**状态：未开始**。每做完一步，在这里记下实际用的命令和遇到的坑，下次重装照着做就行。
+板子已经由老师装好并在运行（11-08）：系统、联网、SSH、摄像头、拍照按钮、开机自启、桌面自动打开网页都已完成。
+板子上的程序在仓库 [orangepi_app/](../orangepi_app/)，运行方式、测速结果和已知问题见 [orangepi_app/ORANGEPI.md](../orangepi_app/ORANGEPI.md)。
+手册在 [archive/reference/](../archive/reference/)（OrangePi 4 Pro 用户手册 v1.4），下面括号里是章节和页码。
 
-手册在 [archive/reference/OrangePi_4_Pro_A733_User Manual_v1.4.pdf](../archive/reference/)，下面括号里是手册章节和页码。
+## 连接
 
-## 装机清单
+先在自己的 Mac 上配好 SSH 密钥（板子连续输错密码会封禁约 4 分钟），再在 `~/.ssh/config` 里加 `Host opi`（`HostName 192.168.3.167`，`User orangepi`）。之后：
 
-- [ ] **烧系统**：官网下载 Ubuntu Jammy 或 Debian Bookworm 镜像，先烧到 TF 卡（§2.4，p.17）；稳定后迁到 eMMC 或 NVMe（§2.5 / §3.35，p.21 / p.193），因为录像会反复写盘。
-- [ ] **联网和远程登录**：Wi-Fi（§3.7.2，p.65），SSH（§3.8.1，p.90）。主机名改成 `fridge`，装 `avahi-daemon`，手机就能用 `http://fridge.local:8000` 访问。
-- [ ] **相机**：插 USB 后用 `v4l2-ctl --list-devices` 找到设备（§3.12.4，p.106）；用 `v4l2-ctl -d /dev/video0 --list-ctrls` 查看曝光控制项，**锁定曝光**（控制项的名字因相机而异，常见的是 `auto_exposure` / `exposure_time_absolute`）。这是 Mac 上做不到的。
-- [ ] **Python 环境**：`python3-venv`；OpenCV 用系统包 `python3-opencv` 或 pip 的 `opencv-python-headless`；从 GitHub 克隆仓库（私有仓库需要令牌，不要把令牌写进任何文件）。
-- [ ] **门磁**：干簧管一端接 GPIO，一端接 GND，开内部上拉（引脚说明 §3.15，p.115；GPIO 测试 §3.17，p.117；上拉 §3.17.2，p.118）。旧项目的按钮用的是物理 7 号脚（GPIO 356 / PL4，见 `archive/camera_system/README.md`），可以沿用，以手册引脚表为准。用 `gpioget` 先测开关门时电平变化。
-- [ ] **开机自启**：采集、分析、后端三个 systemd 服务（后端模板 `smart_fridge_app/deploy/smart-fridge.service.example`）。
-- [ ] **小屏（可选）**：浏览器全屏打开 `http://localhost:8000`（例如 `chromium --kiosk`）；官方 10.1 寸 MIPI 屏见 §3.29，p.164。
-- [ ] **存储清理**：录像只留最近 7 天，关键帧和事件长期保留。
-- [ ] **电源和散热**：Type-C 5V 3A 电源要稳；加散热片；不要放在冰箱顶部出热口上。
+```bash
+ssh opi
+```
+
+板子的 IP、账号见老师给的交接文档（不放在仓库里）。换了 WiFi 或路由器，IP 可能会变：在路由器后台查 `orangepi4pro` 的地址，再改 `~/.ssh/config` 里的 `HostName`。
+
+## 同步代码
+
+```bash
+cd ~/Projects/bx-project && deploy/opi_sync.sh status
+```
+
+`status` 看差异，`pull` 把板子上的改动拉回仓库，`push` 推到板子（默认只列出要改的文件，加 `--yes` 才真正同步）。`.env`、数据、模型、密钥都不会动。
+
+## 重启服务
+
+需要 sudo，在终端里运行：
+
+```bash
+ssh -t opi 'sudo systemctl restart smart-fridge && systemctl is-active smart-fridge'
+```
+
+**可选：只对这个服务免密码。** 加一条只允许启动、停止、重启 `smart-fridge` 的规则，以后部署就不用每次输入密码。这条命令会改动板子的 sudo 设置，要由能做决定的人（你或老师）自己运行：
+
+```bash
+ssh -t opi 'echo "orangepi ALL=(root) NOPASSWD: /usr/bin/systemctl restart smart-fridge, /usr/bin/systemctl start smart-fridge, /usr/bin/systemctl stop smart-fridge" | sudo tee /etc/sudoers.d/smart-fridge >/dev/null && sudo chmod 440 /etc/sudoers.d/smart-fridge && sudo visudo -c'
+```
+
+## 清单
+
+- [x] 烧系统（Orange Pi 1.0.8 Jammy，内核 6.6），联网，SSH
+- [x] 摄像头：UGREEN USB，640×480、15 帧/秒
+- [x] 开机自启：systemd `smart-fridge.service`，root 运行，失败自动重启
+- [x] 桌面自动打开网页（`open_browser.sh`）
+- [x] 拍照按钮（物理 7 脚 PL4）
+- [ ] 门磁：备用开关在物理 11 脚（PL9，接 GND，内部上拉），软件还没接，可以用来判断开关门
+- [ ] 锁定曝光：`v4l2-ctl -d /dev/video1 --list-ctrls` 查控制项（§3.12.4，p.106）
+- [ ] 识别提速：改用 yolo11n 的 ONNX 版本（实测 14.5 帧/秒，现在约 2 帧/秒）
+- [ ] 摄像头断开后自动重新打开
+- [ ] 存储清理：硬盘只剩约 2.5 GB；以后录像只保留最近几天
+- [ ] 散热、电源：Type-C 5V 3A，加散热片
 
 ## 原则
 
-- 只在家里局域网用，**不把端口开到公网**（后端没有登录）。
-- 密钥只放 `.env` 或环境变量，不进 git。
-- NPU（§3.34，p.185）暂时不用：v4 不要求实时识别，工具链成本高。
+- 只在家里或机构的局域网里用，**不把 8080 端口开到公网**（网站没有登录）。以后要远程访问，用 Tailscale 这类组网工具。
+- 密钥只放板子上的 `.env` 和 `config/api_settings.json`，不进 git。

@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+.env
+config/api_settings.json
+storage/uploads/*
+storage/processed/*
+storage/database/*
+storage/backups/*
+storage/logs/*
+!storage/**/.gitkeep

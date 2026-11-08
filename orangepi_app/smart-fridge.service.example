@@ -1,0 +1,18 @@
+[Unit]
+Description=Smart Fridge FastAPI Demo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orangepi
+Group=orangepi
+WorkingDirectory=/home/orangepi/smart_fridge_demo
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/orangepi/smart_fridge_demo/.env
+ExecStart=/home/orangepi/smart_fridge_demo/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
