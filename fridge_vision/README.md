@@ -55,7 +55,7 @@ SOURCE=0 ~/Projects/bx-project/fridge_vision/run_record.command --trigger manual
 - **亮度触发在 Mac 上不可用**：自动曝光 1–7 秒内把亮度拉回（E01）。现在用手动 `o`；v4 倾向门磁。
 - **"时长"含填真值的时间**：`session.json` 的结束时间取在问完真值之后，`summary.md` 的时长偏大；准确时长 = 帧数 ÷ 帧率。
 - `session.json` 里的 YOLO 检测只存前 400 条。
-- **待写**：`import_clip.py`（把手机录像导入成会话，用于 E02 试机位）、门磁触发、环形缓冲、无窗口运行、关门后自动分析。
+- **待写**：`import_clip.py`（把手机录像导入成会话，用于 E03 试机位）、门磁触发、环形缓冲、无窗口运行、关门后自动分析。
 
 ## 对照组（保留，不再开发）
 

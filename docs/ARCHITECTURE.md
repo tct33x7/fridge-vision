@@ -164,7 +164,7 @@ eMMC / M.2 NVMe / TF 卡、Wi-Fi 6、千兆网口、HDMI 2.0、MIPI 屏和 MIPI 
 | 采集 | `fridge_vision/record_sessions.py`（+ `run_record.command`） | 横线方向修正；门磁触发；无窗口运行；环形缓冲 |
 | 分析 | `fridge_vision/process_session.py`、`name_keyframes.py`、`vlm.py` | 横线方向；按"腿"判断手里有无和是什么；关门后自动跑 |
 | 电脑端识别（当前路线） | `demos/yolo_web_counter/` | 第 1 步已完成；第 2–5 步在它上面做（光线和抖动、待机自启动、复杂情况、OCR），第 6 步合并进主功能 |
-| 评测 | `fridge_vision/analyze_sessions.py`、各 `summary.md`、人工表 | 导入手机录像 `import_clip.py`（待写）；E01 / E03 对比表 |
+| 评测 | `fridge_vision/analyze_sessions.py`、各 `summary.md`、人工表 | 导入手机录像 `import_clip.py`（待写）；E01 / E04 对比表 |
 | 后端 | `smart_fridge_app/` | 初始化库存（复用拍照录入）；事件状态 confirmed / wrong；按大模型名字定类别 |
 | 界面 | `smart_fridge_app/frontend/` | "刚才的变化" + 对 / 错 / 改；初始化向导；对账页 |
 | 主机部署 | [deploy/](../deploy/)（新，待写） | OrangePi 装机、锁曝光、门磁、开机自启、小屏全屏 |
@@ -173,10 +173,10 @@ eMMC / M.2 NVMe / TF 卡、Wi-Fi 6、千兆网口、HDMI 2.0、MIPI 屏和 MIPI 
 
 ## 9. 评测：沿用 3.0 的协议，换机位重测
 
-**E02（门洞上方）** 和 E01 用同一套真值协议、同一套脚本，才能直接对比。一轮至少 30 次：放入 / 拿出 × 里面搁板 / 门格 × 1 件 / 2 件，
+**E04（门洞上方）** 和 E01 用同一套真值协议、同一套脚本，才能直接对比。一轮至少 30 次：放入 / 拿出 × 里面搁板 / 门格 × 1 件 / 2 件，
 加空开门、"拿出看一眼又放回"。
 
-| 指标 | E01 正面（11-07） | E02 门洞上方 |
+| 指标 | E01 正面（11-07） | E04 门洞上方 |
 | --- | --- | --- |
 | 人眼可见率（看录像能认出手里的东西） | 待填人工表 | |
 | 动作检出（有真值的会话切出 ≥ 1 次往返） | 13/13 | |

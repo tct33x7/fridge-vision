@@ -7,8 +7,10 @@ YOLO11s 物体轨迹方向计数 Web Demo
 - 物体沿正方向穿过计数线 → 该物品 +1；反方向 → -1
 - 侧边栏实时统计各物品净数量与进出事件
 """
+import argparse
 import math
 import os
+import sys
 import threading
 import time
 from collections import deque, defaultdict
@@ -23,6 +25,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from ultralytics import YOLO
 
+from counter import PRESETS, LineCounter, lock_exposure, make_gate, normalize_light
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 # 模型查找顺序：包内 models/ → 上级 yolo_pretrained/（原工程位置）
 _CANDIDATES = [
@@ -33,9 +37,30 @@ MODEL_PATH = next((p for p in _CANDIDATES if os.path.isfile(p)), _CANDIDATES[0])
 
 DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
 TRAIL_LEN = 40          # 轨迹保留点数
-HYSTERESIS = 6.0        # 距线小于该像素数视为"在线上"，防止抖动重复计数
-TRACK_TIMEOUT = 60      # 连续 N 帧未见则删除轨迹
 CAM_W, CAM_H = 1280, 720
+# 计数参数（滞回、平滑、冷却、类别投票、丢失续接……）在 counter.py 的 PRESETS 里；
+# 启动时用 --preset baseline 可以回到第 1 步的原版逻辑做对比。
+
+
+def parse_args(argv=None):
+    ap = argparse.ArgumentParser(description="YOLO11s 物体轨迹方向计数 Web Demo")
+    ap.add_argument("--source", default="0",
+                    help="摄像头编号(0)、视频文件路径、或 http/rtsp 网络流；默认 0")
+    ap.add_argument("--preset", default="default", choices=sorted(PRESETS),
+                    help="计数逻辑：default=第 2 步优化后，baseline=第 1 步原版")
+    ap.add_argument("--light", default="off", choices=["off", "gain", "clahe"],
+                    help="软件亮度处理：off 不处理 / gain 拉平整体亮度 / clahe 局部均衡")
+    ap.add_argument("--lock-exposure", action="store_true",
+                    help="尝试关闭摄像头自动曝光（Linux/OrangePi 一般可以，macOS 大多不支持）")
+    ap.add_argument("--exposure", type=float, help="配合 --lock-exposure 设一个固定曝光值")
+    ap.add_argument("--line", help="启动时就设好计数线 ax,ay,bx,by（归一化 0~1）")
+    ap.add_argument("--no-loop", action="store_true", help="视频文件放完就停（默认循环）")
+    ap.add_argument("--port", type=int, default=8020)
+    return ap.parse_args(argv)
+
+
+# 被 uvicorn 以 "app:app" 方式导入时不解析命令行
+ARGS = parse_args(sys.argv[1:] if __name__ == "__main__" else [])
 
 # 屏蔽的识别类别：递送物品的手/人不应参与计数，只统计物品本身
 EXCLUDE_CLASSES = {"person"}
@@ -83,7 +108,8 @@ class State:
         self.line = None                        # 归一化 (ax, ay, bx, by)，A→B 方向的左侧为 +1 侧
         self.line_epoch = 0                     # 方向线版本，变更后静默刷新各轨迹所在侧
         self.conf = 0.35
-        self.camera_source = 0            # int 索引（本地/虚拟摄像头）或 str URL（网络流）
+        self.camera_source = 0            # int 索引（本地/虚拟摄像头）或 str（网络流 URL / 视频文件）
+        self.exposure_msg = ""
         self.camera_status = "初始化中..."
         self.fps = 0.0
         self.n_tracks = 0
@@ -124,21 +150,31 @@ def worker():
     except Exception as e:
         print(f"[warn] 预热失败(忽略): {e}")
 
-    tracks = {}   # track_id -> {cls, trail, side, last_seen, line_epoch}
+    counter = LineCounter(PRESETS[ARGS.preset], trail_len=TRAIL_LEN)
+    print(f"[init] 计数逻辑: {ARGS.preset}  亮度处理: {ARGS.light}")
     frame_no = 0
     fps_t = time.time()
 
     while True:
         src = S.camera_source
+        is_file = isinstance(src, str) and os.path.isfile(src)
         if isinstance(src, str) and src.lower().startswith(("http://", "https://", "rtsp://")):
             cap = cv2.VideoCapture(src, cv2.CAP_FFMPEG)
             src_desc = src
+        elif is_file:
+            cap = cv2.VideoCapture(src)
+            src_desc = f"视频 {os.path.basename(src)}"
         else:
             cap = cv2.VideoCapture(int(src))
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_W)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_H)
             cap.set(cv2.CAP_PROP_FPS, 30)
             src_desc = f"摄像头 {src}"
+            if ARGS.lock_exposure:
+                msg = lock_exposure(cap, ARGS.exposure)
+                print(f"[camera] 锁定曝光：{msg}")
+                with S.lock:
+                    S.exposure_msg = msg
         if not cap.isOpened():
             with S.lock:
                 S.camera_status = f"无法打开 {src_desc}（检查权限/被占用，或换个设备）"
@@ -151,11 +187,25 @@ def worker():
             S.frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or CAM_W
             S.frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or CAM_H
         print(f"[camera] 已打开 {src_desc} ({S.frame_w}x{S.frame_h})")
+        file_dt = 1.0 / (cap.get(cv2.CAP_PROP_FPS) or 30) if is_file else 0
 
         while True:
             if S.camera_source != src:
                 break
+            t_read = time.time()
             ret, frame = cap.read()
+            if not ret and is_file:
+                if ARGS.no_loop:
+                    with S.lock:
+                        S.camera_status = f"{src_desc} 已放完"
+                        for e in counter.finish(frame_no):   # 等确认的按最后所在一边算
+                            e["t"] = time.strftime("%H:%M:%S")
+                            S.counts[e["cls"]] += e["delta"]
+                            S.events.append(e)
+                    S.cam_change.wait()
+                    break
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)       # 循环播放
+                continue
             if not ret:
                 with S.lock:
                     S.camera_status = f"{src_desc} 读取失败，重连中..."
@@ -163,6 +213,7 @@ def worker():
                 break
 
             frame_no += 1
+            frame = normalize_light(frame, ARGS.light)
             results = model.track(frame, persist=True, tracker="bytetrack.yaml",
                                   conf=S.conf, imgsz=640, device=DEVICE,
                                   verbose=False)
@@ -174,78 +225,51 @@ def worker():
                 line_epoch = S.line_epoch
 
             # 计数线像素坐标与正方向法向量（A→B 左侧为 +）
-            gate = None
-            if line_norm is not None:
-                H, W = frame.shape[:2]
-                ax, ay = line_norm[0] * W, line_norm[1] * H
-                bx, by = line_norm[2] * W, line_norm[3] * H
-                dx, dy = bx - ax, by - ay
-                L = math.hypot(dx, dy)
-                if L > 10:
-                    ux, uy = dx / L, dy / L
-                    nx, ny = -uy, ux          # 左法线 = 正方向
-                    gate = (ax, ay, bx, by, ux, uy, nx, ny)
+            H, W = frame.shape[:2]
+            gate = make_gate(line_norm, W, H)
 
-            seen_ids = set()
+            dets = []
+            names = model.names
             if r.boxes is not None and r.boxes.id is not None:
-                boxes = r.boxes.xyxy.cpu().numpy()
-                ids = r.boxes.id.int().cpu().numpy()
-                clss = r.boxes.cls.int().cpu().numpy()
-                names = model.names
-
-                for (x1, y1, x2, y2), tid, cid in zip(boxes, ids, clss):
-                    tid = int(tid)
+                for (x1, y1, x2, y2), tid, cid, p in zip(r.boxes.xyxy.cpu().numpy(), r.boxes.id.int().cpu().numpy(),
+                                                         r.boxes.cls.int().cpu().numpy(), r.boxes.conf.cpu().numpy()):
                     # 屏蔽人/手等类别：不追踪、不绘制、不计数
-                    if names[cid] in EXCLUDE_CLASSES:
+                    if names[int(cid)] in EXCLUDE_CLASSES:
                         continue
-                    seen_ids.add(tid)
-                    cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-                    t = tracks.get(tid)
-                    if t is None:
-                        t = {"cls": names[cid], "trail": deque(maxlen=TRAIL_LEN),
-                             "side": 0, "last_seen": frame_no, "line_epoch": -1}
-                        tracks[tid] = t
-                    t["last_seen"] = frame_no
-                    t["trail"].append((cx, cy))
+                    dets.append((int(tid), names[int(cid)], float(p),
+                                 float(x1), float(y1), float(x2), float(y2)))
 
-                    # ---- 方向计数 ----
-                    if gate is not None:
-                        ax, ay, _, _, _, _, nx, ny = gate
-                        proj = (cx - ax) * nx + (cy - ay) * ny
-                        side = 1 if proj > HYSTERESIS else (-1 if proj < -HYSTERESIS else 0)
-                        if t["line_epoch"] != line_epoch:
-                            t["side"] = side if side != 0 else t["side"]
-                            t["line_epoch"] = line_epoch
-                        elif side != 0 and side != t["side"] and t["side"] != 0:
-                            delta = 1 if side > t["side"] else -1
-                            with S.lock:
-                                S.counts[t["cls"]] += delta
-                                S.events.append({"t": now_str, "cls": t["cls"], "delta": delta})
-                            t["side"] = side
-                        elif side != 0:
-                            t["side"] = side
+            # ---- 方向计数（逻辑在 counter.py）----
+            events, visible = counter.update(dets, frame_no, gate, line_epoch)
+            if events or counter.corrections:
+                with S.lock:
+                    for e in events:
+                        e["t"] = now_str              # 事件字典和计数器共用，事后改类别时流水里也跟着改
+                        S.counts[e["cls"]] += e["delta"]
+                        S.events.append(e)
+                    for e, old, new in counter.corrections:   # 事后改类别：把计数从旧类别挪到新类别
+                        S.counts[old] -= e["delta"]
+                        S.counts[new] += e["delta"]
+                        if S.counts[old] == 0:
+                            del S.counts[old]
 
-                    # ---- 绘制 ----
-                    color = PALETTE[cid % len(PALETTE)]
-                    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                    label = f"{zh_name(t['cls'])} #{tid}"
-                    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-                    ty = max(y1, th + 6)
-                    cv2.rectangle(frame, (x1, ty - th - 6), (x1 + tw + 4, ty), color, -1)
-                    cv2.putText(frame, label, (x1 + 2, ty - 4),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
-                    if len(t["trail"]) > 1:
-                        pts = np.array(t["trail"], np.int32).reshape(-1, 1, 2)
-                        cv2.polylines(frame, [pts], False, (255, 220, 80), 2, cv2.LINE_AA)
-                S.n_tracks = len(seen_ids)
-            else:
-                S.n_tracks = 0
-
-            # 清理长期未见的轨迹
-            stale = [k for k, v in tracks.items() if frame_no - v["last_seen"] > TRACK_TIMEOUT]
-            for k in stale:
-                del tracks[k]
+            # ---- 绘制 ----
+            for tid, cls, p, x1, y1, x2, y2 in dets:
+                t = visible[tid]
+                shown = counter.label(t)
+                color = PALETTE[hash(shown) % len(PALETTE)]
+                x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                label = f"{zh_name(shown)} #{tid}" + (" ?" if t.pend_side else "")   # ? = 已过线、等待确认
+                (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+                ty = max(y1, th + 6)
+                cv2.rectangle(frame, (x1, ty - th - 6), (x1 + tw + 4, ty), color, -1)
+                cv2.putText(frame, label, (x1 + 2, ty - 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+                if len(t.trail) > 1:
+                    pts = np.array(t.trail, np.int32).reshape(-1, 1, 2)
+                    cv2.polylines(frame, [pts], False, (255, 220, 80), 2, cv2.LINE_AA)
+            S.n_tracks = len(dets)
 
             # ---- 绘制计数线与正方向箭头 ----
             if gate is not None:
@@ -278,6 +302,9 @@ def worker():
             cv2.putText(frame, hud, (12, frame.shape[0] - 12),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
+            if file_dt:                                   # 视频文件按原速播放
+                time.sleep(max(0.0, file_dt - (time.time() - t_read)))
+
             ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 82])
             if ok:
                 with S.frame_cond:
@@ -290,6 +317,10 @@ def worker():
             S.cam_change.clear()
 
 
+_src = ARGS.source
+S.camera_source = int(_src) if _src.isdigit() else _src
+if ARGS.line:
+    S.line = tuple(float(v) for v in ARGS.line.split(","))
 threading.Thread(target=worker, daemon=True).start()
 
 
@@ -378,10 +409,14 @@ def state():
             "frame_w": S.frame_w,
             "frame_h": S.frame_h,
             "line_set": S.line is not None,
+            "line": S.line,
+            "preset": ARGS.preset,
+            "light": ARGS.light,
+            "exposure": S.exposure_msg,
             "conf": S.conf,
             "n_tracks": S.n_tracks,
             "counts": counts,
-            "events": list(S.events)[-30:][::-1],
+            "events": [{"t": e["t"], "cls": e["cls"], "delta": e["delta"]} for e in list(S.events)[-30:][::-1]],
         }
 
 
@@ -449,6 +484,7 @@ if __name__ == "__main__":
     print("=" * 60)
     print(" YOLO11s 物体轨迹方向计数 Demo")
     print(f" 推理设备: {DEVICE}   模型: {os.path.basename(MODEL_PATH)}")
-    print(" 打开浏览器访问: http://localhost:8020")
+    print(f" 计数逻辑: {ARGS.preset}   亮度处理: {ARGS.light}   来源: {ARGS.source}")
+    print(f" 打开浏览器访问: http://localhost:{ARGS.port}")
     print("=" * 60)
-    uvicorn.run(app, host="0.0.0.0", port=8020, log_level="warning")
+    uvicorn.run(app, host="0.0.0.0", port=ARGS.port, log_level="warning")
