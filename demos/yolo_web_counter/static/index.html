@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YOLO11s 物体轨迹方向计数</title>
+<style>
+  :root {
+    --bg: #101418; --panel: #1a2027; --border: #2a3340;
+    --text: #e8edf2; --muted: #8a97a5; --accent: #ffb020;
+    --green: #4cd964; --red: #ff5f56; --cyan: #38c8d8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    min-height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header h1 span { color: var(--accent); }
+  .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-left: auto; }
+  select, button {
+    background: #232b35; color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 6px 12px; font-size: 13px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); color: #14181d; border: none; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.1); color: #14181d; }
+  .conf-wrap { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+  input[type=range] { width: 110px; accent-color: var(--accent); }
+
+  main { flex: 1; display: flex; gap: 16px; padding: 16px 20px; align-items: flex-start; }
+  .video-col { flex: 1; min-width: 0; }
+  .video-box {
+    position: relative; background: #000; border-radius: 10px; overflow: hidden;
+    border: 1px solid var(--border); line-height: 0;
+  }
+  .video-box img { width: 100%; display: block; }
+  .video-box canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair;
+  }
+  .video-box .hint {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 15px; pointer-events: none; line-height: 1.6;
+  }
+  .statusbar {
+    display: flex; gap: 18px; flex-wrap: wrap; padding: 10px 4px;
+    font-size: 13px; color: var(--muted);
+  }
+  .statusbar b { color: var(--text); font-weight: 600; }
+  .statusbar .ok { color: var(--green); }
+  .statusbar .warn { color: var(--red); }
+  .tip { font-size: 12.5px; color: var(--muted); padding: 2px 4px; }
+  .tip em { color: var(--accent); font-style: normal; }
+
+  aside {
+    width: 320px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px;
+  }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .card h2 { font-size: 14px; color: var(--muted); font-weight: 600; margin-bottom: 10px; }
+  .total { display: flex; align-items: baseline; gap: 8px; }
+  .total .num { font-size: 44px; font-weight: 700; color: var(--cyan); font-variant-numeric: tabular-nums; }
+  .total .lbl { font-size: 13px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+  td { padding: 7px 0; border-bottom: 1px solid #222a33; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  td.num.pos { color: var(--green); }
+  td.num.neg { color: var(--red); }
+  .empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+  .events { max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+  .ev {
+    display: flex; align-items: center; gap: 8px; font-size: 13px;
+    background: #20272f; border-radius: 6px; padding: 6px 10px;
+  }
+  .ev .t { color: var(--muted); font-size: 12px; }
+  .ev .delta { font-weight: 700; margin-left: auto; }
+  .ev .delta.pos { color: var(--green); }
+  .ev .delta.neg { color: var(--red); }
+</style>
+</head>
+<body>
+<header>
+  <h1>YOLO11s <span>物体轨迹方向计数</span></h1>
+  <div class="controls">
+    <label class="conf-wrap">摄像头
+      <select id="camSel"><option value="0">0</option></select>
+    </label>
+    <button onclick="scanCameras()">扫描设备</button>
+    <button class="primary" onclick="switchCam()">切换摄像头</button>
+    <label class="conf-wrap">网络流
+      <input type="text" id="streamUrl" placeholder="http://192.168.x.x/live.m3u8"
+             style="width:190px; background:#232b35; border:1px solid var(--border);
+                    border-radius:6px; padding:6px 8px; color:var(--text); font-size:12px;">
+    </label>
+    <button onclick="useUrl()">使用网络流</button>
+    <label class="conf-wrap">置信度
+      <input type="range" id="confRange" min="0.1" max="0.8" step="0.05" value="0.35">
+      <span id="confVal">0.35</span>
+    </label>
+    <button onclick="flipLine()">翻转正方向</button>
+    <button onclick="clearLine()">清除计数线</button>
+    <button onclick="resetCounts()">计数清零</button>
+  </div>
+</header>
+
+<main>
+  <div class="video-col">
+    <div class="video-box" id="videoBox">
+      <img id="video" src="/video" alt="video stream">
+      <canvas id="overlay"></canvas>
+      <div class="hint" id="hint">等待摄像头画面…<br>画面出现后，按住鼠标拖拽画一条计数线</div>
+    </div>
+    <div class="statusbar">
+      <span>状态: <b id="stCam">-</b></span>
+      <span>分辨率: <b id="stRes">-</b></span>
+      <span>FPS: <b id="stFps">-</b></span>
+      <span>追踪目标: <b id="stTracks">0</b></span>
+      <span>计数线: <b id="stLine">未设置</b></span>
+    </div>
+    <div class="tip">
+      用法：在画面上按住鼠标从 A 拖到 B 画线 —— <em>A→B 方向的左侧为"+1 进入"方向</em>（画面上黄色箭头所示）；
+      物体沿箭头方向穿过虚线 +1，反向 -1。画反了可点"翻转正方向"。<br>
+      iPhone 当摄像头：iPhone 与 Mac 登录同一 Apple ID、开启蓝牙/WiFi 并靠近 → 点"扫描设备"，
+      列表中出现 <em>iPhone（连续互通相机）</em>即可选用；或使用 Camo/EpocCam/Iriun 等 App 提供的流地址填入"网络流"。
+    </div>
+  </div>
+
+  <aside>
+    <div class="card">
+      <h2>净计数（进入 - 拿出）</h2>
+      <div class="total"><span class="num" id="totalCount">0</span><span class="lbl">件物品在场净值</span></div>
+    </div>
+    <div class="card">
+      <h2>分物品统计</h2>
+      <table>
+        <thead><tr><th>物品</th><th style="text-align:right">数量</th></tr></thead>
+        <tbody id="countsBody"></tbody>
+      </table>
+      <div class="empty" id="countsEmpty">暂无计数</div>
+    </div>
+    <div class="card">
+      <h2>进出事件</h2>
+      <div class="events" id="eventsList"><div class="empty">暂无事件</div></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const box = document.getElementById('videoBox');
+const ctx = overlay.getContext('2d');
+const ZH = {person:'人', bicycle:'自行车', car:'汽车', motorcycle:'摩托车', bus:'公交车',
+  truck:'卡车', bottle:'瓶子', 'wine glass':'酒杯', cup:'杯子', bowl:'碗', banana:'香蕉',
+  apple:'苹果', orange:'橙子', pizza:'披萨', donut:'甜甜圈', cake:'蛋糕', sandwich:'三明治',
+  chair:'椅子', couch:'沙发', 'potted plant':'盆栽', 'dining table':'餐桌', tv:'显示器',
+  laptop:'笔记本电脑', mouse:'鼠标', remote:'遥控器', keyboard:'键盘', 'cell phone':'手机',
+  book:'书', clock:'时钟', vase:'花瓶', scissors:'剪刀', 'teddy bear':'玩具熊',
+  backpack:'背包', umbrella:'雨伞', handbag:'手提包', tie:'领带', suitcase:'行李箱',
+  'sports ball':'球', 'baseball bat':'棒球棒', skateboard:'滑板', 'tennis racket':'网球拍',
+  fork:'叉子', knife:'刀', spoon:'勺子', cat:'猫', dog:'狗'};
+
+function fitCanvas() {
+  overlay.width = box.clientWidth;
+  overlay.height = box.clientHeight;
+  drawPreview();
+}
+window.addEventListener('resize', fitCanvas);
+video.addEventListener('load', () => { document.getElementById('hint').style.display='none'; fitCanvas(); });
+setTimeout(fitCanvas, 300);
+
+let dragging = false, dragStart = null, dragCur = null;
+function normPos(e) {
+  const r = box.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+}
+overlay.addEventListener('mousedown', e => {
+  dragging = true; dragStart = normPos(e); dragCur = dragStart;
+});
+overlay.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  dragCur = normPos(e); drawPreview();
+});
+overlay.addEventListener('mouseup', async e => {
+  if (!dragging) return;
+  dragging = false;
+  const end = normPos(e);
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  const len = Math.hypot(end.x - dragStart.x, end.y - dragStart.y);
+  if (len > 0.03) {
+    await fetch('/api/line', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ax: dragStart.x, ay: dragStart.y, bx: end.x, by: end.y})
+    });
+    refresh();
+  }
+  dragStart = null;
+});
+overlay.addEventListener('mouseleave', () => {
+  if (dragging) { dragging = false; dragStart = null; ctx.clearRect(0, 0, overlay.width, overlay.height); }
+});
+function drawPreview() {
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  if (!dragging || !dragStart || !dragCur) return;
+  const r = box.getBoundingClientRect();
+  const x1 = dragStart.x * r.width, y1 = dragStart.y * r.height;
+  const x2 = dragCur.x * r.width, y2 = dragCur.y * r.height;
+  // 计数线
+  ctx.strokeStyle = 'rgba(0,180,255,0.95)'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  // 正方向箭头（A→B 左侧）
+  const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1;
+  const nx = -dy / L, ny = dx / L;
+  const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+  ctx.strokeStyle = '#ffd020'; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(mx + nx * 60, my + ny * 60); ctx.stroke();
+  const tx = mx + nx * 60, ty = my + ny * 60;
+  ctx.fillStyle = '#ffd020';
+  ctx.beginPath();
+  ctx.moveTo(tx + nx * 12, ty + ny * 12);
+  ctx.lineTo(tx - ny * 6, ty + nx * 6);
+  ctx.lineTo(tx + ny * 6, ty - nx * 6);
+  ctx.closePath(); ctx.fill();
+}
+
+async function post(path, body) {
+  await fetch(path, body ? {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)} : {method: 'POST'});
+  refresh();
+}
+async function scanCameras() {
+  const sel = document.getElementById('camSel');
+  sel.innerHTML = '<option>扫描中...</option>';
+  try {
+    const r = await (await fetch('/api/cameras')).json();
+    sel.innerHTML = '';
+    if (!r.cameras.length) {
+      sel.innerHTML = '<option value="0">（未发现设备，填编号0）</option>';
+      return;
+    }
+    r.cameras.forEach(c => {
+      const o = document.createElement('option');
+      o.value = c.index;
+      o.textContent = c.is_phone ? `${c.name} [iPhone]` : `${c.index}: ${c.name}`;
+      if (c.is_phone) o.style.color = 'var(--accent)';
+      sel.appendChild(o);
+    });
+  } catch (e) {
+    sel.innerHTML = '<option value="0">扫描失败，填编号0</option>';
+  }
+}
+function switchCam() { post('/api/camera', {index: parseInt(document.getElementById('camSel').value)}); }
+function useUrl() {
+  const url = document.getElementById('streamUrl').value.trim();
+  if (!url) { alert('请先输入网络流地址（http/rtsp）'); return; }
+  post('/api/camera', {url});
+}
+function flipLine() { post('/api/line/flip'); }
+function clearLine() { post('/api/line/clear'); }
+function resetCounts() { post('/api/reset'); }
+
+const confRange = document.getElementById('confRange');
+let confTimer = null;
+confRange.addEventListener('input', () => {
+  document.getElementById('confVal').textContent = confRange.value;
+  clearTimeout(confTimer);
+  confTimer = setTimeout(() => post('/api/conf', {value: parseFloat(confRange.value)}), 300);
+});
+
+function zh(n) { return ZH[n] || n; }
+
+async function refresh() {
+  try {
+    const s = await (await fetch('/api/state')).json();
+    document.getElementById('stCam').textContent = s.camera_status;
+    document.getElementById('stCam').className = s.camera_status.includes('运行') ? 'ok' : 'warn';
+    document.getElementById('stRes').textContent = s.frame_w + 'x' + s.frame_h;
+    document.getElementById('stFps').textContent = s.fps;
+    document.getElementById('stTracks').textContent = s.n_tracks;
+    const stLine = document.getElementById('stLine');
+    stLine.textContent = s.line_set ? '已设置' : '未设置';
+    stLine.style.color = s.line_set ? 'var(--green)' : 'var(--muted)';
+
+    const entries = Object.entries(s.counts);
+    const total = entries.reduce((a, [, v]) => a + v, 0);
+    document.getElementById('totalCount').textContent = total;
+
+    const body = document.getElementById('countsBody');
+    document.getElementById('countsEmpty').style.display = entries.length ? 'none' : 'block';
+    body.innerHTML = entries.map(([k, v]) =>
+      `<tr><td>${zh(k)}</td><td class="num ${v > 0 ? 'pos' : (v < 0 ? 'neg' : '')}">${v > 0 ? '+' : ''}${v}</td></tr>`
+    ).join('');
+
+    const evList = document.getElementById('eventsList');
+    evList.innerHTML = s.events.length
+      ? s.events.map(e => `<div class="ev"><span class="t">${e.t}</span><span>${zh(e.cls)}</span><span class="delta ${e.delta > 0 ? 'pos' : 'neg'}">${e.delta > 0 ? '+1 进入' : '-1 拿出'}</span></div>`).join('')
+      : '<div class="empty">暂无事件</div>';
+  } catch (e) { /* 忽略轮询错误 */ }
+}
+refresh();
+setInterval(refresh, 500);
+</script>
+</body>
+</html>

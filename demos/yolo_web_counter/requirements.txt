@@ -1,0 +1,12 @@
+# YOLO11s 物体轨迹方向计数 Web Demo
+# Python 3.10+（在 macOS Apple Silicon / Python 3.13 环境验证）
+# 注意：torch 建议按目标平台官网命令安装，以下版本为验证环境所用
+
+ultralytics==8.4.87
+torch==2.6.0
+opencv-python>=4.10
+fastapi==0.136.1
+uvicorn==0.46.0
+pydantic==2.11.7
+numpy>=1.26
+lap>=0.5.12          # ByteTrack 追踪器依赖（ultralytics 也会自动安装）

@@ -33,3 +33,6 @@ archive/camera_system/data/
 # fridge_vision 运行输出与自动下载的权重
 fridge_vision/runs/
 fridge_vision/*.pt
+
+# demo 自带的通用预训练权重（19MB，COCO，非自训）需要提交
+!demos/yolo_web_counter/models/yolo11s.pt
