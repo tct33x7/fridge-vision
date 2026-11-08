@@ -4,7 +4,7 @@
 #   deploy/opi.sh status            服务、计数（待机/识别中）、硬盘、两边代码差异：只看不改
 #   deploy/opi.sh diff              两边代码哪里不一样
 #   deploy/opi.sh pull              板子 → 仓库（有人直接在板子上改过时用；之后 git diff 看改了什么）
-#   deploy/opi.sh push [--yes]      仓库 → 板子；不加 --yes 只列出会改哪些文件
+#   deploy/opi.sh push [--yes]      仓库 → 板子；不加 --yes 只列出会改哪些文件；板子上有人改过时会停下
 #   deploy/opi.sh models            把 orangepi_app/models/ 里的模型传到板子（模型不进 git）
 #   deploy/opi.sh env [KEY=VALUE…]  看板子 .env 里计数和待机的设置；带参数就修改（先自动备份 .env）
 #   deploy/opi.sh deploy            = push --yes + models，然后提示重启
@@ -28,6 +28,7 @@ EXCLUDES=(
   --exclude '*.pt' --exclude '*.onnx' --exclude '*.db' --exclude '*.sqlite*'
   --exclude logs --exclude backups --exclude uploads --exclude processed --exclude 'test food.jpg'
   --exclude smart-fridge.service.deployed --exclude ORANGEPI.md --exclude tests --exclude tools
+  --exclude .deployed
 )
 # -c 按内容比较（git 不保留修改时间，按时间比会把没改的文件也算进来）
 RSYNC=(rsync -rlc --itemize-changes -e "ssh -o BatchMode=yes" "${EXCLUDES[@]}")
@@ -52,21 +53,35 @@ for s in (d.get("sessions") or [])[:5]:
 '
 }
 
+# 板子上记着上次部署的是哪个提交（~/smart_fridge_demo/.deployed）；没有记录时以 main 为准。
+# 拿板子和那个版本比，列出部署之后被人直接在板子上改过的文件。
+board_edits() {
+  local base tmp
+  base=$("${SSH[@]}" "head -1 ~/${REMOTE}.deployed 2>/dev/null" || true)
+  git -C "$REPO" cat-file -e "${base:-main}^{commit}" 2>/dev/null || base=main
+  tmp=$(mktemp -d)
+  git -C "$REPO" archive "${base:-main}" orangepi_app | tar -x -C "$tmp"
+  echo "  （对照的是上次部署的版本：$(git -C "$REPO" log -1 --format='%h %s' "${base:-main}" | cut -c1-60)）"
+  "${RSYNC[@]}" --dry-run "$HOST:$REMOTE" "$tmp/orangepi_app/" | grep -E '^>f' | sed 's/^/  板子上被改过 /' || echo "  没有：部署之后没人在板子上改过代码"
+  rm -rf "$tmp"
+}
+
 case "${1:-}" in
   status)
     echo "== 服务"
     "${SSH[@]}" 'printf "  smart-fridge：%s，开机自启：%s\n" "$(systemctl is-active smart-fridge)" "$(systemctl is-enabled smart-fridge)"; df -h / | awk "NR==2{print \"  硬盘剩余：\" \$4}"; ls ~/smart_fridge_demo/models/ | sed "s/^/  模型文件：/"'
     echo "== 计数"
     state_summary
-    echo "== 代码（> 仓库会推到板子 / < 板子比仓库新）"
-    { "${RSYNC[@]}" --dry-run "$LOCAL" "$HOST:$REMOTE" | grep -v '/$' | sed 's/^/  推送 /'; \
-      "${RSYNC[@]}" --dry-run "$HOST:$REMOTE" "$LOCAL" | grep -v '/$' | sed 's/^/  拉回 /'; } || true
+    echo "== 板子上的代码有没有被人直接改过"
+    board_edits
+    echo "== push 会推过去的文件（当前分支：$(git -C "$REPO" branch --show-current)）"
+    "${RSYNC[@]}" --dry-run "$LOCAL" "$HOST:$REMOTE" | grep -E '^<f' | sed 's/^/  /' || echo "  没有：板子和本地一样"
     ;;
   diff)
-    echo "== 仓库 → 板子（push 会推过去）"
-    "${RSYNC[@]}" --dry-run "$LOCAL" "$HOST:$REMOTE" | grep -v '/$' || true
-    echo "== 板子 → 仓库（pull 会拉回来）"
-    "${RSYNC[@]}" --dry-run "$HOST:$REMOTE" "$LOCAL" | grep -v '/$' || true
+    echo "== push 会推过去的文件"
+    "${RSYNC[@]}" --dry-run "$LOCAL" "$HOST:$REMOTE" | grep -E '^<f' || echo "  没有"
+    echo "== 板子上被直接改过的文件（pull 会拉回来；对照上次部署的版本）"
+    board_edits
     ;;
   pull)
     "${RSYNC[@]}" "$HOST:$REMOTE" "$LOCAL" | grep -v '/$' || true
@@ -78,8 +93,19 @@ case "${1:-}" in
       "${RSYNC[@]}" --dry-run "$LOCAL" "$HOST:$REMOTE" | grep -v '/$' || true
       exit 0
     fi
-    "${RSYNC[@]}" "$LOCAL" "$HOST:$REMOTE" | grep -v '/$' || true
-    echo "已推送代码。重启服务后生效：deploy/opi.sh restart"
+    edits=$(board_edits | grep '板子上被改过' || true)
+    if [ -n "$edits" ] && [ "${3:-}" != "--force" ]; then
+      echo "$edits"
+      echo "上次部署之后，有人直接在板子上改过上面这些文件。推送会覆盖它们，所以先停下。"
+      echo "先 deploy/opi.sh pull 拉回来、提交、合并进当前分支，再推送（确定要覆盖就加 --force）。"
+      exit 1
+    fi
+    if [ -n "$(git -C "$REPO" status --porcelain -- orangepi_app)" ]; then
+      echo "提醒：orangepi_app/ 里有没提交的改动，这次也会推上去，但板子记录的版本里没有它们。"
+    fi
+    "${RSYNC[@]}" "$LOCAL" "$HOST:$REMOTE" | grep -E '^<f' || true
+    "${SSH[@]}" "printf '%s\\n%s\\n' '$(git -C "$REPO" rev-parse HEAD)' '$(date '+%F %T') $(git -C "$REPO" branch --show-current)' > ~/${REMOTE}.deployed"
+    echo "已推送代码（版本 $(git -C "$REPO" rev-parse --short HEAD)，记录在板子 .deployed 里）。重启服务后生效：deploy/opi.sh restart"
     ;;
   models)
     shopt -s nullglob
