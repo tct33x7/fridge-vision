@@ -631,17 +631,22 @@ function renderCounterState(data) {
   const offlineHint = $("#counterOfflineHint");
   if (!chip || !offline) return;
   const paused = data.paused || !data.running;
-  chip.textContent = paused ? "已暂停" : data.error ? "异常" : "计数中";
-  chip.className = `tiny-badge ${paused ? "paused" : data.error ? "error" : "live"}`;
+  const standby = !paused && !data.error && data.door_state === "standby";
+  chip.textContent = paused ? "已暂停" : data.error ? "异常" : standby ? "待机" : "识别中";
+  chip.className = `tiny-badge ${paused || standby ? "paused" : data.error ? "error" : "live"}`;
   offline.classList.toggle("hidden", !paused);
   if (paused) {
     offlineTitle.textContent = "计数监控暂停";
     offlineHint.textContent = data.error || "已切换到手动拍照；离开摄像头页面后自动恢复";
   }
   $("#counterStatusText").textContent = data.error || data.status || "未启动";
-  $("#counterStatsMeta").textContent = data.running
-    ? `${data.fps ?? "?"} FPS · 追踪 ${data.n_tracks ?? 0} 个目标 · 置信度 ${Math.round((data.conf || 0) * 100)}%`
-    : "";
+  const last = (data.sessions || [])[0];
+  const lastText = last ? ` · 上次开门 #${last.n} ${last.seconds} 秒、计数 ${last.events} 个（${last.sleep}）` : "";
+  $("#counterStatsMeta").textContent = !data.running ? ""
+    : standby
+      ? `画面变化 ${((data.motion || 0) * 100).toFixed(1)}%${lastText}`
+      : `${data.fps ?? "?"} FPS · 追踪 ${data.n_tracks ?? 0} 个目标 · 置信度 ${Math.round((data.conf || 0) * 100)}%`
+        + (data.session ? ` · 第 ${data.session} 次开门` : "");
   const counts = data.counts || {};
   $("#counterCounts").innerHTML = Object.keys(counts).length
     ? Object.entries(counts).map(([name, net]) => `

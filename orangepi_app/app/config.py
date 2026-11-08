@@ -51,6 +51,21 @@ COUNTER_ENABLED = os.getenv("SMART_FRIDGE_COUNTER_ENABLED", "true").lower() in {
 COUNTER_MODEL = os.getenv("SMART_FRIDGE_COUNTER_MODEL", str(BASE_DIR / "models" / "yolo11s.pt"))
 COUNTER_IMGSZ = int(os.getenv("SMART_FRIDGE_COUNTER_IMGSZ", "320"))
 COUNTER_CONFIDENCE = float(os.getenv("SMART_FRIDGE_COUNTER_CONFIDENCE", "0.35"))
+# 过线计数规则（app/services/line_counter.py 的 PRESETS）：default = 第 2 步优化版；
+# hidden = 门洞上方、看不到冰箱里面时用；baseline = 第 1 步原版
+COUNTER_PRESET = os.getenv("SMART_FRIDGE_COUNTER_PRESET", "default")
+
+# 开门检测与待机（app/services/door_watcher.py）：没有门磁，靠画面变化判断
+DOOR_STANDBY_ENABLED = os.getenv("SMART_FRIDGE_DOOR_STANDBY", "true").lower() in {
+    "1", "true", "yes", "on",
+}
+DOOR_WAKE_RATIO = float(os.getenv("SMART_FRIDGE_DOOR_WAKE_RATIO", "0.03"))
+DOOR_WAKE_BRIGHTNESS = float(os.getenv("SMART_FRIDGE_DOOR_WAKE_BRIGHTNESS", "18"))
+DOOR_WAKE_HITS = int(os.getenv("SMART_FRIDGE_DOOR_WAKE_HITS", "2"))
+DOOR_SLEEP_RATIO = float(os.getenv("SMART_FRIDGE_DOOR_SLEEP_RATIO", "0.01"))
+DOOR_SLEEP_SECONDS = float(os.getenv("SMART_FRIDGE_DOOR_SLEEP_SECONDS", "6"))
+DOOR_MAX_ACTIVE_SECONDS = float(os.getenv("SMART_FRIDGE_DOOR_MAX_ACTIVE_SECONDS", "300"))
+DOOR_ROI = os.getenv("SMART_FRIDGE_DOOR_ROI", "")  # 只看这块画面 x0,y0,x1,y1（0–1）；空 = 整幅
 # 计数推理引擎: npu = 香橙派 VIPLite NPU + yolov5.nb; cpu = ultralytics yolo11s; auto = 优先 NPU 失败回退 CPU
 COUNTER_ENGINE = os.getenv("SMART_FRIDGE_COUNTER_ENGINE", "auto").lower()
 COUNTER_NPU_MODEL = os.getenv("SMART_FRIDGE_COUNTER_NPU_MODEL", "/opt/yolov5/model/yolov5.nb")
