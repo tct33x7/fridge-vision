@@ -48,7 +48,26 @@ except ImportError:  # 开发机上无摄像头依赖时保持可导入
 LINE_FILE = STORAGE_DIR / "counter_line.json"
 
 TRAIL_LEN = 40          # 轨迹保留点数
-EXCLUDE_CLASSES = {"person"}  # 递送物品的手/人不参与计数
+# 静止物品：存在超过这么多帧（约 3 秒）、离第一次出现的位置始终不到这么多像素 -> 不显示（台面上一直摆着的瓶子等）
+STATIC_FRAMES = 45
+STATIC_RADIUS = 30.0
+# 不参与计数的品类：人（递送的手）+ 永远不会放进冰箱的东西
+# （动物/车辆/户外设施/家具家电/电子产品/运动器械/随身物品）（老师 11-08 17:19 定的名单）
+EXCLUDE_CLASSES = {
+    "person",
+    "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
+    "traffic light", "fire hydrant", "stop sign", "parking meter", "bench",
+    "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear",
+    "zebra", "giraffe",
+    "backpack", "umbrella", "handbag", "tie", "suitcase",
+    "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat",
+    "baseball glove", "skateboard", "surfboard", "tennis racket",
+    "chair", "couch", "potted plant", "bed", "dining table", "toilet",
+    "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
+    "microwave", "oven", "toaster", "sink", "refrigerator",
+    "book", "clock", "scissors", "hair drier", "toothbrush",
+}
+# 可计数 = 食物/饮品/餐具 + vase/teddy bear（交给静止筛选兜底）
 READ_FAIL_REOPEN = 10   # 连续这么多次读不到画面（约 3 秒）就关掉摄像头重新打开（拔插后会这样）
 STANDBY_FRAME_INTERVAL = 0.5  # 待机时网页画面每隔多少秒更新一次
 
@@ -436,9 +455,13 @@ class CounterService:
             dets.append((int(tid), cls_name, conf, float(x1), float(y1), float(x2), float(y2)))
         events, visible = self.counter.update(dets, self.frame_no, gate, line_epoch)
         self._apply_events(events, self.counter.corrections)
-        self.n_tracks = len(dets)
+        # 静止物品不画、不算进目标数（它们没过线，本来也不会被计数；一旦被拿起移动就恢复显示）
+        shown = [d for d in dets
+                 if not (d[0] in visible and visible[d[0]].seen >= STATIC_FRAMES
+                         and visible[d[0]].travel < STATIC_RADIUS)]
+        self.n_tracks = len(shown)
 
-        self._draw_tracks(frame, dets, visible)
+        self._draw_tracks(frame, shown, visible)
         self._draw_line(frame, gate)
         inst = 1.0 / max(now - self._fps_t, 1e-6)
         self.inference_fps = self.inference_fps * 0.9 + inst * 0.1 if self.inference_fps else min(inst, 30.0)
