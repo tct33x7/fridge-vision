@@ -38,9 +38,24 @@ EXCLUDE_CLASSES = {"person"}
 
 # ---------------- 第一步：检测（带缓存） ----------------
 
-def detect(video, light, conf, imgsz, cache_dir, max_frames=None, quiet=False):
+def apply_keep(frame, keep):
+    """只保留 keep=(x0, y0, x1, y1)（归一化）这块区域，其余涂黑。用来模拟"看不到冰箱里面"。"""
+    if not keep:
+        return frame
+    H, W = frame.shape[:2]
+    x0, y0, x1, y1 = int(keep[0] * W), int(keep[1] * H), int(keep[2] * W), int(keep[3] * H)
+    out = frame.copy()
+    out[:, :x0] = 0
+    out[:, x1:] = 0
+    out[:y0, :] = 0
+    out[y1:, :] = 0
+    return out
+
+
+def detect(video, light, conf, imgsz, cache_dir, max_frames=None, quiet=False, keep=None):
     base = os.path.splitext(os.path.basename(video))[0]
-    cache = os.path.join(cache_dir, f"{base}.light-{light}.conf-{conf}.img-{imgsz}.dets.json")
+    ktag = ".keep-" + "_".join(f"{v:g}" for v in keep) if keep else ""
+    cache = os.path.join(cache_dir, f"{base}.light-{light}.conf-{conf}.img-{imgsz}{ktag}.dets.json")
     if os.path.isfile(cache) and os.path.getmtime(cache) >= os.path.getmtime(video):
         with open(cache, encoding="utf-8") as f:
             d = json.load(f)
@@ -64,7 +79,7 @@ def detect(video, light, conf, imgsz, cache_dir, max_frames=None, quiet=False):
         ok, frame = cap.read()
         if not ok or (max_frames and len(frames) >= max_frames):
             break
-        frame = normalize_light(frame, light)
+        frame = normalize_light(apply_keep(frame, keep), light)
         r = model.track(frame, persist=True, tracker="bytetrack.yaml", conf=conf,
                         imgsz=imgsz, device=device, verbose=False)[0]
         dets = []
@@ -80,7 +95,7 @@ def detect(video, light, conf, imgsz, cache_dir, max_frames=None, quiet=False):
         if not quiet and len(frames) % 100 == 0:
             print(f"  检测中 {len(frames)}/{total} 帧 ({len(frames) / (time.time() - t0):.1f} 帧/秒)", file=sys.stderr)
     cap.release()
-    d = {"video": os.path.basename(video), "light": light, "conf": conf, "imgsz": imgsz,
+    d = {"video": os.path.basename(video), "light": light, "conf": conf, "imgsz": imgsz, "keep": keep,
          "w": W, "h": H, "fps": fps, "frames": len(frames), "dets": frames, "device": device,
          "sec_per_frame": round((time.time() - t0) / max(1, len(frames)), 4)}
     os.makedirs(cache_dir, exist_ok=True)
@@ -183,7 +198,7 @@ def score_segments(events, truth, slack=10):
 
 # ---------------- 导出带框视频（看哪里出错用） ----------------
 
-def save_video(video, d, cfg, line, out, light):
+def save_video(video, d, cfg, line, out, light, keep=None):
     cap = cv2.VideoCapture(video)
     vw = cv2.VideoWriter(out, cv2.VideoWriter_fourcc(*"mp4v"), d["fps"], (d["w"], d["h"]))
     gate = make_gate(line, d["w"], d["h"])
@@ -193,7 +208,7 @@ def save_video(video, d, cfg, line, out, light):
         ok, frame = cap.read()
         if not ok:
             break
-        frame = normalize_light(frame, light)
+        frame = normalize_light(apply_keep(frame, keep), light)
         ev, vis = lc.update([tuple(x) for x in dets], i, gate)
         for e in ev:
             counts[e["cls"]] += e["delta"]
@@ -228,6 +243,12 @@ ABLATE_KEYS = {
     "事后改类别": {"revote": False},
     "确认时间": {"confirm_frames": 0},
 }
+# 不在 default 里、单独试的规则：--try-rules 时在 default 上逐个打开
+TRY_RULES = {
+    "压线消失也算": {"edge_in": True},
+    "压线出现也算": {"edge_out": True},
+    "两条都开": {"edge_in": True, "edge_out": True},
+}
 
 
 def main():
@@ -237,11 +258,14 @@ def main():
     ap.add_argument("--line", help="计数线 ax,ay,bx,by（归一化）；默认用真值文件里的")
     ap.add_argument("--preset", default="baseline,default", help="逗号分隔，默认 baseline,default")
     ap.add_argument("--light", default="off", help="亮度处理 off/gain/clahe，逗号分隔可一次比较多个")
+    ap.add_argument("--keep", help="只保留画面里 x0,y0,x1,y1（归一化）这块，其余涂黑再检测。"
+                                   "模拟看不到冰箱里面，例如线在 0.5、里侧只留 0.1：--keep 0.4,0,1,1")
     ap.add_argument("--conf", type=float, default=0.35)
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--cache-dir", help="检测缓存放哪；默认和视频同一个文件夹")
     ap.add_argument("--max-frames", type=int)
     ap.add_argument("--ablate", action="store_true", help="逐项关掉 / 单独打开每个优化，看各自作用")
+    ap.add_argument("--try-rules", action="store_true", help="在 default 上试 压线消失 / 压线出现 两条规则")
     ap.add_argument("--segments", action="store_true", help="逐段显示结果（真值里有 segments 时）")
     ap.add_argument("--save-video", help="导出带框和计数的视频（用第一个 preset 和第一个 light）")
     ap.add_argument("--class-noise", type=float, default=0.0,
@@ -260,6 +284,9 @@ def main():
     if not line:
         sys.exit("需要计数线：--line ax,ay,bx,by 或在真值文件里写 \"line\"")
     cache_dir = a.cache_dir or os.path.dirname(os.path.abspath(a.video))
+    keep = [float(v) for v in a.keep.split(",")] if a.keep else None
+    if keep:
+        print(f"（只保留画面 {keep}，其余涂黑）")
 
     runs = []   # (名字, light, cfg)
     lights = a.light.split(",")
@@ -278,10 +305,14 @@ def main():
         for name, off in ABLATE_KEYS.items():
             runs.append((f"default − 关掉「{name}」", lights[0], replace(full, **off)))
 
+    if a.try_rules:
+        for name, on in TRY_RULES.items():
+            runs.append((f"default + 「{name}」", lights[0], replace(PRESETS["default"], **on)))
+
     dets = {}
     for light in lights:
         print(f"[检测] light={light} …", file=sys.stderr)
-        dets[light] = detect(a.video, light, a.conf, a.imgsz, cache_dir, a.max_frames)
+        dets[light] = detect(a.video, light, a.conf, a.imgsz, cache_dir, a.max_frames, keep=keep)
         if a.class_noise > 0:
             dets[light] = add_class_noise(dets[light], a.class_noise)
             print(f"[压力测试] 已把 {a.class_noise:.0%} 的检测框换成相近类别", file=sys.stderr)
@@ -313,7 +344,7 @@ def main():
             print(f"| {name} | {len(events)} | | | | | | {relinks} |")
 
     if a.segments and truth.get("segments"):
-        main_runs = [r for r in results if not r["name"].startswith(("baseline +", "default −"))]
+        main_runs = [r for r in results if not r["name"].startswith(("baseline +", "default −", "default +"))]
         print()
         print("| 段 | 物品 | 真值 | " + " | ".join(r["name"] for r in main_runs) + " |")
         print("| --- | --- | --- | " + " | ".join("---" for _ in main_runs) + " |")
@@ -332,7 +363,7 @@ def main():
             json.dump(results, f, ensure_ascii=False, indent=1)
     if a.save_video:
         name, light, cfg = runs[0]
-        save_video(a.video, dets[light], cfg, line, a.save_video, light)
+        save_video(a.video, dets[light], cfg, line, a.save_video, light, keep)
         print(f"\n已导出 {a.save_video}（{name}）")
 
 

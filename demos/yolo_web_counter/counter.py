@@ -31,6 +31,9 @@ class CounterConfig:
     revote: bool = False             # 计数之后继续投票，类别变了就改正已经记下的事件（要配合 class_vote）
     confirm_frames: int = 0          # 确认时间：过线后要在新的一边待满这么多帧（或在那边消失）才计数；
                                      # 没待满就回来了 = 拿出又放回 / 晃动，不计。0 = 一过线马上计
+    # 看不到冰箱里面时（门洞上方机位）用的两条规则，要配合 confirm_frames：
+    edge_in: bool = False            # 压线消失也算：物体压在线上、正往某一边走，然后消失了 → 算它到了那一边
+    edge_out: bool = False           # 压线出现也算：物体第一次出现就压在线上，然后走到某一边 → 算它是从另一边来的
     # 出生推断（试过，默认关）：在 E02 的合成视频和 mix1 上各多计 1–2 次，也没救回 jitter1 的快速苹果
     birth_zone: float = 0.0          # 新目标第一次出现时离线很近（滞回带外 这么多倍框宽以内）……
     birth_frames: int = 8            # ……并且在这么多帧内继续往远离线的方向走，
@@ -61,7 +64,8 @@ def get_config(name="default", **overrides):
 class _Track:
     __slots__ = ("cls_now", "votes", "trail", "pos", "side", "seen", "last_seen",
                  "last_count", "line_epoch", "box", "lost_at", "relinked",
-                 "birth_side", "birth_proj", "birth_frame", "pend_side", "pend_since")
+                 "birth_side", "birth_proj", "birth_frame", "pend_side", "pend_since",
+                 "born_band", "born_proj", "raw_side", "proj_hist", "wn")
 
     def __init__(self, trail_len):
         self.cls_now = None
@@ -81,6 +85,11 @@ class _Track:
         self.birth_frame = 0
         self.pend_side = 0               # 确认时间：已经过线、还没确认的那一侧（0 = 没有）
         self.pend_since = 0
+        self.born_band = False           # 第一次出现就压在线上（还不知道从哪边来）
+        self.born_proj = 0.0
+        self.raw_side = 0                # 最近一次看到时在哪一侧（0 = 压在线上）
+        self.proj_hist = deque(maxlen=6) # 最近几次到线的有符号距离，用来判断往哪边走
+        self.wn = 0.0                    # 框沿过线方向的宽度
 
 
 class LineCounter:
@@ -179,6 +188,8 @@ class LineCounter:
             wn = abs(w * nx) + abs(h * ny)            # 框沿过线方向的宽度
             hyst = c.hysteresis_px + c.hysteresis_box * wn
             side = 1 if proj > hyst else (-1 if proj < -hyst else 0)
+            t.proj_hist.append(proj)
+            t.raw_side, t.wn = side, wn
 
             if t.line_epoch != line_epoch:            # 新画了线 / 新目标：只记录在哪一侧，不计数
                 t.line_epoch = line_epoch
@@ -188,6 +199,8 @@ class LineCounter:
                     t.birth_side, t.birth_proj, t.birth_frame = side, abs(proj), frame_no
                 else:
                     t.side = side if side != 0 else t.side
+                t.born_band = side == 0 and t.seen == 1 and not t.relinked
+                t.born_proj = proj
                 continue
             if t.birth_side:
                 if side == t.birth_side and abs(proj) >= t.birth_proj + c.birth_move * wn:
@@ -207,6 +220,13 @@ class LineCounter:
             if side == 0:
                 continue
             if c.confirm_frames > 0:
+                if t.side == 0 and t.born_band and c.edge_out and (proj - t.born_proj) * side >= 0.5 * wn:
+                    # 压线出现、又往 side 这一边走了半个框宽以上：算它是从另一边来的，照常等确认
+                    # （原地不动、只是框大小变了的误检不算）
+                    t.born_band = False
+                    t.side, t.pend_side, t.pend_since = -side, side, frame_no
+                    continue
+                t.born_band = False
                 if t.side == 0 or side == t.side:
                     if t.pend_side:               # 没待满确认时间就回到原来那边：拿出又放回 / 晃动，不计
                         self.cancelled += 1
@@ -239,8 +259,12 @@ class LineCounter:
                 if t.lost_at is None:
                     t.lost_at = frame_no
                 # 确认时间：过线后在新的一边消失了（放进去 / 拿走了），续接窗口过了也没回来 → 确认
-                if (t.pend_side and t not in done and frame_no - t.last_seen > c.relink_frames
-                        and t.seen >= c.min_frames):
+                gone = t not in done and frame_no - t.last_seen > c.relink_frames and t.seen >= c.min_frames
+                if gone and not t.pend_side and c.edge_in and t.side != 0 and t.raw_side == 0 \
+                        and len(t.proj_hist) >= 2 and (t.proj_hist[-1] - t.proj_hist[0]) * t.side <= -0.25 * t.wn:
+                    # 压在线上、最近几帧往另一边走了 1/4 个框宽以上，然后消失了：算它到了另一边（进了冰箱 / 被拿走）
+                    t.pend_side, t.pend_since = -t.side, t.last_seen
+                if gone and t.pend_side:
                     self._emit(events, t, tid, t.pend_since, frame_no)
                     done.add(t)
                 if frame_no - t.last_seen > c.track_timeout:

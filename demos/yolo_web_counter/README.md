@@ -132,6 +132,9 @@ cd ~/Projects/bx-project/demos/yolo_web_counter
 .venv/bin/python replay.py test_videos/jitter1.mp4 --preset default --save-video test_videos/jitter1_boxes.mp4  # 导出带框视频，看错在哪
 ```
 
+模拟"看不到冰箱里面"（门洞上方机位）：`--keep 0.4,0,1,1` 只保留画面 x 从 0.4 到 1 这一块，其余涂黑再检测（线在 0.5 时，里侧只剩 0.1 宽）。
+`--try-rules` 会在新逻辑上试"压线消失也算 / 压线出现也算"两条规则（`edge_in` / `edge_out`，默认关，还在测试）。
+
 第一次跑会做 YOLO 检测，结果缓存成 `*.dets.json`。之后换参数再跑只要几秒，而且所有方案用的是同一份检测结果。
 
 没有录像时，可以先用合成视频：`.venv/bin/python tools/make_test_video.py test_videos/synthetic.mp4`，然后 `replay.py test_videos/synthetic.mp4 --segments`。
