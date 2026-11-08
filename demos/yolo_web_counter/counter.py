@@ -29,6 +29,8 @@ class CounterConfig:
     relink_dist: float = 0.0         # 续接距离上限 = 目标框对角线 × 这个倍数
     track_timeout: int = 60          # 连续多少帧没看到就删掉轨迹
     revote: bool = False             # 计数之后继续投票，类别变了就改正已经记下的事件（要配合 class_vote）
+    confirm_frames: int = 0          # 确认时间：过线后要在新的一边待满这么多帧（或在那边消失）才计数；
+                                     # 没待满就回来了 = 拿出又放回 / 晃动，不计。0 = 一过线马上计
     # 出生推断（试过，默认关）：在 E02 的合成视频和 mix1 上各多计 1–2 次，也没救回 jitter1 的快速苹果
     birth_zone: float = 0.0          # 新目标第一次出现时离线很近（滞回带外 这么多倍框宽以内）……
     birth_frames: int = 8            # ……并且在这么多帧内继续往远离线的方向走，
@@ -47,6 +49,7 @@ PRESETS = {
         relink_frames=20,
         relink_dist=2.0,
         revote=True,
+        confirm_frames=90,
     ),
 }
 
@@ -58,7 +61,7 @@ def get_config(name="default", **overrides):
 class _Track:
     __slots__ = ("cls_now", "votes", "trail", "pos", "side", "seen", "last_seen",
                  "last_count", "line_epoch", "box", "lost_at", "relinked",
-                 "birth_side", "birth_proj", "birth_frame")
+                 "birth_side", "birth_proj", "birth_frame", "pend_side", "pend_since")
 
     def __init__(self, trail_len):
         self.cls_now = None
@@ -76,6 +79,8 @@ class _Track:
         self.birth_side = 0              # 出生推断：等待中的那一侧（0 = 没在等）
         self.birth_proj = 0.0
         self.birth_frame = 0
+        self.pend_side = 0               # 确认时间：已经过线、还没确认的那一侧（0 = 没有）
+        self.pend_since = 0
 
 
 class LineCounter:
@@ -88,12 +93,22 @@ class LineCounter:
         self.open_events = []     # [(事件, 轨迹)]：轨迹还活着，类别可能还会被改正
         self.corrections = []     # 本帧改正了类别的事件 [(事件, 旧类别, 新类别)]
         self.birth_counts = 0
+        self.cancelled = 0        # 过了线但没待满确认时间就回来了（没计）的次数
 
     # ---------- 工具 ----------
     def label(self, t):
         if self.cfg.class_vote and t.votes:
             return t.votes.most_common(1)[0][0]
         return t.cls_now
+
+    def _emit(self, events, t, tid, cross_frame, frame_no):
+        """确认一次过线：从 t.side 到 t.pend_side。"""
+        delta = 1 if t.pend_side > t.side else -1
+        ev = {"frame": cross_frame, "tid": tid, "cls": self.label(t), "delta": delta, "confirmed_at": frame_no}
+        events.append(ev)
+        self.open_events.append((ev, t))
+        t.last_count = frame_no
+        t.side, t.pend_side = t.pend_side, 0
 
     def _try_relink(self, cls, cx, cy, w, h, frame_no):
         """新编号出现时，在刚丢失的轨迹里找一个同类、距离近的接上。"""
@@ -191,6 +206,19 @@ class LineCounter:
                     continue
             if side == 0:
                 continue
+            if c.confirm_frames > 0:
+                if t.side == 0 or side == t.side:
+                    if t.pend_side:               # 没待满确认时间就回到原来那边：拿出又放回 / 晃动，不计
+                        self.cancelled += 1
+                        t.pend_side = 0
+                    t.side = side
+                    continue
+                if t.pend_side != side:
+                    t.pend_side, t.pend_since = side, frame_no
+                ready = t.seen >= c.min_frames and frame_no - t.last_count >= c.cooldown_frames
+                if ready and frame_no - t.pend_since >= c.confirm_frames:
+                    self._emit(events, t, tid, t.pend_since, frame_no)
+                continue
             if t.side != 0 and side != t.side:
                 ready = t.seen >= c.min_frames and frame_no - t.last_count >= c.cooldown_frames
                 if ready:
@@ -205,10 +233,16 @@ class LineCounter:
                 t.side = side
 
         # 标记丢失、删除过期
+        done = set()
         for tid, t in list(self.tracks.items()):
             if t not in seen_now:
                 if t.lost_at is None:
                     t.lost_at = frame_no
+                # 确认时间：过线后在新的一边消失了（放进去 / 拿走了），续接窗口过了也没回来 → 确认
+                if (t.pend_side and t not in done and frame_no - t.last_seen > c.relink_frames
+                        and t.seen >= c.min_frames):
+                    self._emit(events, t, tid, t.pend_since, frame_no)
+                    done.add(t)
                 if frame_no - t.last_seen > c.track_timeout:
                     del self.tracks[tid]
 
@@ -227,6 +261,16 @@ class LineCounter:
                     keep.append((ev, t))
             self.open_events = keep
         return events, visible
+
+
+    def finish(self, frame_no):
+        """视频结束 / 关门：还在等确认的过线，按最后所在的一边确认。返回补上的事件。"""
+        events, done = [], set()
+        for tid, t in list(self.tracks.items()):
+            if t.pend_side and t not in done and t.seen >= self.cfg.min_frames:
+                self._emit(events, t, tid, t.pend_since, frame_no)
+                done.add(t)
+        return events
 
 
 # ---------------- 光线：软件亮度归一化 ----------------

@@ -198,6 +198,10 @@ def worker():
                 if ARGS.no_loop:
                     with S.lock:
                         S.camera_status = f"{src_desc} 已放完"
+                        for e in counter.finish(frame_no):   # 等确认的按最后所在一边算
+                            e["t"] = time.strftime("%H:%M:%S")
+                            S.counts[e["cls"]] += e["delta"]
+                            S.events.append(e)
                     S.cam_change.wait()
                     break
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)       # 循环播放
@@ -256,7 +260,7 @@ def worker():
                 color = PALETTE[hash(shown) % len(PALETTE)]
                 x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                label = f"{zh_name(shown)} #{tid}"
+                label = f"{zh_name(shown)} #{tid}" + (" ?" if t.pend_side else "")   # ? = 已过线、等待确认
                 (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
                 ty = max(y1, th + 6)
                 cv2.rectangle(frame, (x1, ty - th - 6), (x1 + tw + 4, ty), color, -1)

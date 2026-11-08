@@ -114,6 +114,7 @@ def run_counter(d, cfg, line):
     for i, dets in enumerate(d["dets"], start=1):
         ev, _ = lc.update([tuple(x) for x in dets], i, gate)
         events.extend(ev)
+    events.extend(lc.finish(len(d["dets"])))      # 视频结束 = 关门：等确认的按最后一边算
     return events, lc.relinks
 
 
@@ -225,6 +226,7 @@ ABLATE_KEYS = {
     "类别投票": {"class_vote": False},
     "丢失后续接": {"relink_frames": 0},
     "事后改类别": {"revote": False},
+    "确认时间": {"confirm_frames": 0},
 }
 
 
