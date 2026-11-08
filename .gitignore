@@ -44,3 +44,12 @@ private/
 demos/yolo_web_counter/test_videos/
 *.mp4
 *.mov
+
+# orangepi_app：板子上的运行配置、数据和模型（只在板子上，不进 git）
+orangepi_app/.env
+orangepi_app/.venv/
+orangepi_app/storage/
+orangepi_app/config/api_settings.json
+orangepi_app/models/*.pt
+orangepi_app/yolo/*.onnx
+orangepi_app/.env.orangepi

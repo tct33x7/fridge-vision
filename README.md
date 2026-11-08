@@ -39,11 +39,12 @@ smart_fridge_app/   库存后端（FastAPI + SQLite）：初始化、事件、�
 | 目录 | 是什么 | 状态 |
 | --- | --- | --- |
 | [`fridge_vision/`](fridge_vision/) | 门口视觉：录制工具、离线分析（方向、认名）、评测脚本。`runs/` 是本机数据 | **主线** |
+| [`orangepi_app/`](orangepi_app/) | **OrangePi 上实际运行的程序**（11-08 从板子同步）：网页、拍照识别、过线计数、GPIO 按钮；用 `deploy/opi_sync.sh` 同步 | **主线**（部署中） |
 | [`smart_fridge_app/`](smart_fridge_app/) | 库存后端和网页（手机 / 小屏）：批次、门事件、拍照录入、备份；34 个测试 | **主线** |
 | [`docs/`](docs/) | 架构、日程、决策、实验记录、报告。[目录](docs/README.md) | **主线** |
 | [`demos/`](demos/) | 独立的小 demo。`yolo_web_counter/`：网页版 YOLO11s + ByteTrack，拖一条计数线，按方向统计物品进出（11-08） | 演示 / 练习 |
 | [`hardware/`](hardware/) | 相机支架、门磁、主机外壳 | 预留（v4 新增） |
-| [`deploy/`](deploy/) | OrangePi 装机和开机自启 | 预留（v4 新增） |
+| [`deploy/`](deploy/) | 连接 OrangePi、同步代码、重启服务 | 在用 |
 | [`archive/`](archive/) | 旧项目：拍照 / 扫码 demo、OrangePi 相机服务、扫码枪外壳、OrangePi 手册 | 归档；相机服务的 GPIO 代码和手册 v4 还会用到 |
 
 ## 快速开始（Mac）

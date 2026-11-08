@@ -1,0 +1,11 @@
+{
+  "name": "食光冰箱 Smart Fridge",
+  "short_name": "食光冰箱",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f3ea",
+  "theme_color": "#ffdd2d",
+  "lang": "zh-CN",
+  "icons": []
+}
+
