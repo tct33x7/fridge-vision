@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 YOLO11s 物体轨迹方向计数 Web Demo
-- 打开 USB 摄像头，YOLO11s + ByteTrack 检测并追踪物体
+- 打开 USB 摄像头，YOLO11s 检测物体，追踪器（默认 ByteTrack，可换 OC-SORT / BoT-SORT 等，见 trackers.py）连成轨迹
 - 用户在画面上拖拽画一条"计数线"，拖拽方向决定正方向（线的左侧为 +1 方向）
 - 物体沿正方向穿过计数线 → 该物品 +1；反方向 → -1
 - 侧边栏实时统计各物品净数量与进出事件
@@ -23,9 +23,8 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from ultralytics import YOLO
-
 from counter import PRESETS, LineCounter, lock_exposure, make_gate, normalize_light
+from trackers import DETECT_CONF, TRACKERS, Detector, Tracker, parse_spec
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 # 模型查找顺序：包内 models/ → 上级 yolo_pretrained/（原工程位置）
@@ -48,6 +47,9 @@ def parse_args(argv=None):
                     help="摄像头编号(0)、视频文件路径、或 http/rtsp 网络流；默认 0")
     ap.add_argument("--preset", default="default", choices=sorted(PRESETS),
                     help="计数逻辑：default=第 2 步优化后，hidden=看不到冰箱里面时（门洞上方机位），baseline=第 1 步原版")
+    ap.add_argument("--tracker", default="bytetrack-oflow",
+                    help="追踪器：" + " / ".join(TRACKERS) + "；名字后加 +low 表示低分框也送进追踪器补配，"
+                         "例如 bytetrack+low。说明见 trackers.py 和 README")
     ap.add_argument("--light", default="off", choices=["off", "gain", "clahe"],
                     help="软件亮度处理：off 不处理 / gain 拉平整体亮度 / clahe 局部均衡")
     ap.add_argument("--lock-exposure", action="store_true",
@@ -56,7 +58,12 @@ def parse_args(argv=None):
     ap.add_argument("--line", help="启动时就设好计数线 ax,ay,bx,by（归一化 0~1）")
     ap.add_argument("--no-loop", action="store_true", help="视频文件放完就停（默认循环）")
     ap.add_argument("--port", type=int, default=8020)
-    return ap.parse_args(argv)
+    a = ap.parse_args(argv)
+    try:
+        parse_spec(a.tracker)
+    except ValueError as e:
+        ap.error(str(e))
+    return a
 
 
 # 被 uvicorn 以 "app:app" 方式导入时不解析命令行
@@ -141,17 +148,18 @@ def draw_dashed(img, p1, p2, color, thickness=2, dash=18, gap=12):
 
 
 def worker():
-    model = YOLO(MODEL_PATH)
+    name, use_low = parse_spec(ARGS.tracker)
+    tracker = Tracker(name, conf=S.conf, use_low=use_low)
+    detector = Detector(MODEL_PATH, device=DEVICE, imgsz=640, with_feats=tracker.needs_feats)
     print(f"[init] 模型已加载: {MODEL_PATH} (推理设备: {DEVICE})")
     # 预热，避免首帧卡顿
     try:
-        model.predict(np.zeros((CAM_H, CAM_W, 3), np.uint8), device=DEVICE,
-                      verbose=False, imgsz=640)
+        detector(np.zeros((CAM_H, CAM_W, 3), np.uint8))
     except Exception as e:
         print(f"[warn] 预热失败(忽略): {e}")
 
     counter = LineCounter(PRESETS[ARGS.preset], trail_len=TRAIL_LEN)
-    print(f"[init] 计数逻辑: {ARGS.preset}  亮度处理: {ARGS.light}")
+    print(f"[init] 追踪器: {ARGS.tracker}  计数逻辑: {ARGS.preset}  亮度处理: {ARGS.light}")
     frame_no = 0
     fps_t = time.time()
 
@@ -214,10 +222,11 @@ def worker():
 
             frame_no += 1
             frame = normalize_light(frame, ARGS.light)
-            results = model.track(frame, persist=True, tracker="bytetrack.yaml",
-                                  conf=S.conf, imgsz=640, device=DEVICE,
-                                  verbose=False)
-            r = results[0]
+            if tracker.conf != S.conf:                     # 网页上调了门槛
+                tracker.set_conf(S.conf)
+                detector.conf = min(DETECT_CONF, S.conf)
+            xyxy, conf, cls, feats = detector(frame)        # YOLO 只检测（含 0.1 以上的低分框）
+            tracks = tracker.update(xyxy, conf, cls, frame=frame, feats=feats)   # 追踪器连成轨迹
             now_str = time.strftime("%H:%M:%S")
 
             with S.lock:
@@ -229,15 +238,13 @@ def worker():
             gate = make_gate(line_norm, W, H)
 
             dets = []
-            names = model.names
-            if r.boxes is not None and r.boxes.id is not None:
-                for (x1, y1, x2, y2), tid, cid, p in zip(r.boxes.xyxy.cpu().numpy(), r.boxes.id.int().cpu().numpy(),
-                                                         r.boxes.cls.int().cpu().numpy(), r.boxes.conf.cpu().numpy()):
-                    # 屏蔽人/手等类别：不追踪、不绘制、不计数
-                    if names[int(cid)] in EXCLUDE_CLASSES:
-                        continue
-                    dets.append((int(tid), names[int(cid)], float(p),
-                                 float(x1), float(y1), float(x2), float(y2)))
+            names = detector.names
+            for x1, y1, x2, y2, tid, p, cid in tracks:
+                # 屏蔽人/手等类别：不绘制、不计数
+                if names[int(cid)] in EXCLUDE_CLASSES:
+                    continue
+                dets.append((int(tid), names[int(cid)], float(p),
+                             float(x1), float(y1), float(x2), float(y2)))
 
             # ---- 方向计数（逻辑在 counter.py）----
             events, visible = counter.update(dets, frame_no, gate, line_epoch)
@@ -411,6 +418,7 @@ def state():
             "line_set": S.line is not None,
             "line": S.line,
             "preset": ARGS.preset,
+            "tracker": ARGS.tracker,
             "light": ARGS.light,
             "exposure": S.exposure_msg,
             "conf": S.conf,
@@ -484,7 +492,7 @@ if __name__ == "__main__":
     print("=" * 60)
     print(" YOLO11s 物体轨迹方向计数 Demo")
     print(f" 推理设备: {DEVICE}   模型: {os.path.basename(MODEL_PATH)}")
-    print(f" 计数逻辑: {ARGS.preset}   亮度处理: {ARGS.light}   来源: {ARGS.source}")
+    print(f" 追踪器: {ARGS.tracker}   计数逻辑: {ARGS.preset}   亮度处理: {ARGS.light}   来源: {ARGS.source}")
     print(f" 打开浏览器访问: http://localhost:{ARGS.port}")
     print("=" * 60)
     uvicorn.run(app, host="0.0.0.0", port=ARGS.port, log_level="warning")

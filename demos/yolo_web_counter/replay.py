@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-无界面重放：拿一段录好的视频，跑 YOLO11s + ByteTrack，再用不同的计数参数各算一遍，
+无界面重放：拿一段录好的视频，跑 YOLO11s 检测 → 追踪器 → 计数逻辑，
 和真值比较"多计 / 漏计 / 类别跳变"。
 
-YOLO 的检测结果会缓存成 .dets.json，换计数参数再跑时不用重新检测，
-而且保证"优化前 / 优化后"用的是一模一样的检测结果，比较才公平。
+YOLO 的检测结果（含 0.1 以上的低分框和特征向量）会缓存成 .raw.npz，换追踪器、换计数参数再跑时不用重新检测，
+而且保证大家用的是一模一样的检测结果，比较才公平。
 
 例子：
   python replay.py test_videos/synthetic.mp4                         # 真值文件自动找 synthetic.truth.json
   python replay.py test_videos/my1.mp4 --truth test_videos/my1.truth.json --light gain
   python replay.py test_videos/my1.mp4 --ablate                      # 逐项开关每个优化，看各自作用
+  python replay.py test_videos/my1.mp4 --tracker bytetrack,ocsort,botsort,deepocsort   # 换追踪器比较
   python replay.py test_videos/my1.mp4 --save-video out.mp4 --preset default   # 导出带框的视频
 
 真值文件（自己录的视频手写一个就行）：
@@ -28,10 +29,12 @@ from collections import Counter, defaultdict
 from dataclasses import asdict, replace
 
 import cv2
+import numpy as np
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 from counter import PRESETS, LineCounter, make_gate, normalize_light  # noqa: E402
+from trackers import DETECT_CONF, TRACKERS, Detector, Tracker, parse_spec  # noqa: E402
 
 EXCLUDE_CLASSES = {"person"}
 
@@ -52,56 +55,137 @@ def apply_keep(frame, keep):
     return out
 
 
-def detect(video, light, conf, imgsz, cache_dir, max_frames=None, quiet=False, keep=None):
+def iter_frames(video, light="off", keep=None, max_frames=None):
+    """按顺序读出视频的每一帧，做和检测时一样的处理（涂黑、调亮度）。"""
+    cap = cv2.VideoCapture(video)
+    if not cap.isOpened():
+        sys.exit(f"打不开视频：{video}")
+    n = 0
+    while not max_frames or n < max_frames:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        n += 1
+        yield normalize_light(apply_keep(frame, keep), light)
+    cap.release()
+
+
+def raw_cache_path(video, light, imgsz, cache_dir, keep=None):
     base = os.path.splitext(os.path.basename(video))[0]
     ktag = ".keep-" + "_".join(f"{v:g}" for v in keep) if keep else ""
-    cache = os.path.join(cache_dir, f"{base}.light-{light}.conf-{conf}.img-{imgsz}{ktag}.dets.json")
+    return os.path.join(cache_dir, f"{base}.light-{light}.img-{imgsz}{ktag}.raw.npz")
+
+
+def detect_raw(video, light, imgsz, cache_dir, max_frames=None, quiet=False, keep=None):
+    """
+    YOLO 每帧只检测、不追踪，把分数 ≥ 0.1 的框（含低分框）和每个框的特征向量缓存成 .raw.npz。
+    之后换追踪器、换计数参数都不用重新检测，而且大家用的是一模一样的检测结果。
+    """
+    cache = raw_cache_path(video, light, imgsz, cache_dir, keep)
     if os.path.isfile(cache) and os.path.getmtime(cache) >= os.path.getmtime(video):
-        with open(cache, encoding="utf-8") as f:
-            d = json.load(f)
-        if max_frames is None or d["frames"] <= max_frames:
-            return d
+        raw = load_raw(cache)
+        if raw["complete"] or (max_frames and raw["frames"] >= max_frames):
+            return truncate_raw(raw, max_frames)
 
     import torch
-    from ultralytics import YOLO
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
-    model_path = os.path.join(ROOT, "models", "yolo11s.pt")
-    model = YOLO(model_path)
+    device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
+    det = Detector(os.path.join(ROOT, "models", "yolo11s.pt"), device=device, imgsz=imgsz, with_feats=True)
     cap = cv2.VideoCapture(video)
     if not cap.isOpened():
         sys.exit(f"打不开视频：{video}")
     W, H = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    frames = []
+    cap.release()
+    off, xyxy, conf, cls, feats = [0], [], [], [], []
     t0 = time.time()
-    while True:
-        ok, frame = cap.read()
-        if not ok or (max_frames and len(frames) >= max_frames):
-            break
-        frame = normalize_light(apply_keep(frame, keep), light)
-        r = model.track(frame, persist=True, tracker="bytetrack.yaml", conf=conf,
-                        imgsz=imgsz, device=device, verbose=False)[0]
-        dets = []
-        if r.boxes is not None and r.boxes.id is not None:
-            for (x1, y1, x2, y2), tid, cid, p in zip(r.boxes.xyxy.cpu().numpy(), r.boxes.id.int().cpu().numpy(),
-                                                     r.boxes.cls.int().cpu().numpy(), r.boxes.conf.cpu().numpy()):
-                name = model.names[int(cid)]
+    n = 0
+    for frame in iter_frames(video, light, keep, max_frames):
+        b, c, k, f = det(frame)
+        xyxy.append(b)
+        conf.append(c)
+        cls.append(k)
+        if len(b):
+            feats.append(f.astype(np.float16))
+        n += 1
+        off.append(off[-1] + len(b))
+        if not quiet and n % 100 == 0:
+            print(f"  检测中 {n}/{total} 帧 ({n / (time.time() - t0):.1f} 帧/秒)", file=sys.stderr)
+    dim = feats[0].shape[1] if feats else 1
+    meta = {"video": os.path.basename(video), "light": light, "imgsz": imgsz, "keep": keep,
+            "w": W, "h": H, "fps": fps, "frames": n, "complete": not max_frames or n < max_frames,
+            "device": device, "sec_per_frame": round((time.time() - t0) / max(1, n), 4),
+            "names": [det.names[i] for i in range(len(det.names))], "detect_conf": DETECT_CONF}
+    os.makedirs(cache_dir, exist_ok=True)
+    np.savez_compressed(
+        cache, meta=np.array(json.dumps(meta, ensure_ascii=False)), off=np.array(off, np.int64),
+        xyxy=np.concatenate(xyxy).astype(np.float32) if n else np.zeros((0, 4), np.float32),
+        conf=np.concatenate(conf).astype(np.float32) if n else np.zeros(0, np.float32),
+        cls=np.concatenate(cls).astype(np.int16) if n else np.zeros(0, np.int16),
+        feats=np.concatenate(feats) if feats else np.zeros((0, dim), np.float16))
+    return load_raw(cache)
+
+
+def load_raw(path):
+    z = np.load(path, allow_pickle=False)
+    raw = json.loads(str(z["meta"]))
+    raw.update(off=z["off"], xyxy=z["xyxy"], conf=z["conf"], cls=z["cls"], feats=z["feats"])
+    return raw
+
+
+def truncate_raw(raw, max_frames):
+    if not max_frames or raw["frames"] <= max_frames:
+        return raw
+    out = dict(raw)
+    m = int(raw["off"][max_frames])
+    out.update(frames=max_frames, off=raw["off"][:max_frames + 1], xyxy=raw["xyxy"][:m],
+               conf=raw["conf"][:m], cls=raw["cls"][:m], feats=raw["feats"][:m])
+    return out
+
+
+def parse_tracker_spec(spec):
+    try:
+        return parse_spec(spec)
+    except ValueError as e:
+        sys.exit(str(e))
+
+
+def track_many(raw, specs, conf, video=None, light="off", keep=None, quiet=False):
+    """
+    第二步：同一份检测结果分别交给几个追踪器。specs 例如 ["bytetrack", "ocsort", "bytetrack+low"]。
+    返回 {spec: d}，d["dets"] 的格式：每帧 [[编号, 类别名, 置信度, x1, y1, x2, y2], ...]（已去掉 person）。
+    """
+    trks = {}
+    for s in specs:
+        name, use_low = parse_tracker_spec(s)
+        trks[s] = Tracker(name, conf=conf, use_low=use_low)
+    need_frames = any(t.needs_frame for t in trks.values())
+    if need_frames and not (video and os.path.isfile(video)):
+        sys.exit(f"{[s for s, t in trks.items() if t.needs_frame]} 要用光流，需要原视频：{video}")
+    frames = iter_frames(video, light, keep, raw["frames"]) if need_frames else None
+    names, off, has_feats = raw["names"], raw["off"], len(raw["feats"]) == len(raw["conf"])
+    outs = {s: [] for s in specs}
+    t0 = time.time()
+    for i in range(raw["frames"]):
+        frame = next(frames, None) if frames is not None else None
+        a, b = int(off[i]), int(off[i + 1])
+        feats = raw["feats"][a:b] if has_feats else None
+        for s, t in trks.items():
+            res = t.update(raw["xyxy"][a:b], raw["conf"][a:b], raw["cls"][a:b], frame=frame, feats=feats,
+                           shape=(raw["h"], raw["w"]))
+            dets = []
+            for x1, y1, x2, y2, tid, p, c in res:
+                name = names[int(c)]
                 if name in EXCLUDE_CLASSES:
                     continue
                 dets.append([int(tid), name, round(float(p), 3),
                              round(float(x1), 1), round(float(y1), 1), round(float(x2), 1), round(float(y2), 1)])
-        frames.append(dets)
-        if not quiet and len(frames) % 100 == 0:
-            print(f"  检测中 {len(frames)}/{total} 帧 ({len(frames) / (time.time() - t0):.1f} 帧/秒)", file=sys.stderr)
-    cap.release()
-    d = {"video": os.path.basename(video), "light": light, "conf": conf, "imgsz": imgsz, "keep": keep,
-         "w": W, "h": H, "fps": fps, "frames": len(frames), "dets": frames, "device": device,
-         "sec_per_frame": round((time.time() - t0) / max(1, len(frames)), 4)}
-    os.makedirs(cache_dir, exist_ok=True)
-    with open(cache, "w", encoding="utf-8") as f:
-        json.dump(d, f, ensure_ascii=False, separators=(",", ":"))
-    return d
+            outs[s].append(dets)
+        if not quiet and (i + 1) % 500 == 0:
+            print(f"  追踪中 {i + 1}/{raw['frames']} 帧（{len(trks)} 个追踪器，{time.time() - t0:.0f} 秒）", file=sys.stderr)
+    keys = ("video", "light", "imgsz", "keep", "w", "h", "fps", "frames", "device", "sec_per_frame")
+    return {s: {**{k: raw[k] for k in keys}, "conf": conf, "tracker": s, "dets": outs[s],
+                "track_ms": round(t.ms_per_frame, 2)} for s, t in trks.items()}
 
 
 # ---------------- 第二步：计数 ----------------
@@ -261,7 +345,10 @@ def main():
     ap.add_argument("--light", default="off", help="亮度处理 off/gain/clahe，逗号分隔可一次比较多个")
     ap.add_argument("--keep", help="只保留画面里 x0,y0,x1,y1（归一化）这块，其余涂黑再检测。"
                                    "模拟看不到冰箱里面，例如线在 0.5、里侧只留 0.1：--keep 0.4,0,1,1")
-    ap.add_argument("--conf", type=float, default=0.35)
+    ap.add_argument("--conf", type=float, default=0.35, help="分数 ≥ 这个才能新建轨迹（以前是检测门槛）")
+    ap.add_argument("--tracker", default="bytetrack-oflow",
+                    help="追踪器，逗号分隔可一次比较多个：" + " / ".join(TRACKERS) +
+                         "；名字后加 +low 表示把 0.1～conf 的低分框也送进追踪器，例如 bytetrack+low")
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--cache-dir", help="检测缓存放哪；默认和视频同一个文件夹")
     ap.add_argument("--max-frames", type=int)
@@ -289,11 +376,16 @@ def main():
     if keep:
         print(f"（只保留画面 {keep}，其余涂黑）")
 
-    runs = []   # (名字, light, cfg)
+    runs = []   # (名字, light, 追踪器, cfg)
     lights = a.light.split(",")
+    specs = a.tracker.split(",")
+    for s in specs:
+        parse_tracker_spec(s)
     for light in lights:
-        for p in a.preset.split(","):
-            runs.append((p if len(lights) == 1 else f"{p}+{light}", light, PRESETS[p]))
+        for s in specs:
+            for p in a.preset.split(","):
+                name = p if len(lights) == 1 else f"{p}+{light}"
+                runs.append((name if len(specs) == 1 else f"{s} · {name}", light, s, PRESETS[p]))
     if a.ablate:
         base, full = PRESETS["baseline"], PRESETS["default"]
         for name, off in ABLATE_KEYS.items():
@@ -302,40 +394,46 @@ def main():
                 on["relink_dist"] = full.relink_dist
             if name == "事后改类别":
                 on["class_vote"] = True
-            runs.append((f"baseline + 只开「{name}」", lights[0], replace(base, **on)))
+            runs.append((f"baseline + 只开「{name}」", lights[0], specs[0], replace(base, **on)))
         for name, off in ABLATE_KEYS.items():
-            runs.append((f"default − 关掉「{name}」", lights[0], replace(full, **off)))
+            runs.append((f"default − 关掉「{name}」", lights[0], specs[0], replace(full, **off)))
 
     if a.try_rules:
         for name, on in TRY_RULES.items():
-            runs.append((f"default + 「{name}」", lights[0], replace(PRESETS["default"], **on)))
+            runs.append((f"default + 「{name}」", lights[0], specs[0], replace(PRESETS["default"], **on)))
 
-    dets = {}
+    dets = {}   # (light, 追踪器) → 追踪结果
     for light in lights:
         print(f"[检测] light={light} …", file=sys.stderr)
-        dets[light] = detect(a.video, light, a.conf, a.imgsz, cache_dir, a.max_frames, keep=keep)
-        if a.class_noise > 0:
-            dets[light] = add_class_noise(dets[light], a.class_noise)
-            print(f"[压力测试] 已把 {a.class_noise:.0%} 的检测框换成相近类别", file=sys.stderr)
+        raw = detect_raw(a.video, light, a.imgsz, cache_dir, a.max_frames, keep=keep)
+        print(f"[追踪] {', '.join(specs)} …", file=sys.stderr)
+        for s, d in track_many(raw, specs, a.conf, a.video, light, keep).items():
+            if a.class_noise > 0:
+                d = add_class_noise(d, a.class_noise)
+            dets[(light, s)] = d
+    if a.class_noise > 0:
+        print(f"[压力测试] 已把 {a.class_noise:.0%} 的检测框换成相近类别", file=sys.stderr)
 
     results = []
     print()
-    print(f"视频：{a.video}   帧数：{dets[lights[0]]['frames']}   计数线：{line}")
+    first = dets[(lights[0], specs[0])]
+    print(f"视频：{a.video}   帧数：{first['frames']}   计数线：{line}   "
+          f"检测每帧 {first['sec_per_frame'] * 1000:.0f} ms（{first['device']}）")
     if truth.get("expected"):
         print(f"真值：{json.dumps(truth['expected'], ensure_ascii=False)}")
-    for light in lights:
-        flips, ntid = raw_class_flips(dets[light])
-        print(f"原始检测（light={light}）：{ntid} 个追踪编号，类别跳变 {flips} 次，"
-              f"每帧 {dets[light]['sec_per_frame'] * 1000:.0f} ms（{dets[light]['device']}）")
+    for (light, s), d in dets.items():
+        flips, ntid = raw_class_flips(d)
+        print(f"追踪结果（light={light}，{s}）：{ntid} 个追踪编号，类别跳变 {flips} 次，"
+              f"追踪每帧 {d['track_ms']:.1f} ms")
     print()
     if truth.get("segments"):
         print("（有分段真值：按段计分，类别错也算多计 + 漏计）")
     print("| 方案 | 计数事件 | 应有 | 计对 | 多计 | 漏计 | 净数正确 | 续接 |")
     print("| --- | --- | --- | --- | --- | --- | --- | --- |")
-    for name, light, cfg in runs:
-        events, relinks = run_counter(dets[light], cfg, line)
+    for name, light, spec, cfg in runs:
+        events, relinks = run_counter(dets[(light, spec)], cfg, line)
         s = score(events, truth) if truth.get("expected") else {"events": len(events)}
-        results.append({"name": name, "light": light, "cfg": asdict(cfg), "score": s,
+        results.append({"name": name, "light": light, "tracker": spec, "cfg": asdict(cfg), "score": s,
                         "events": events, "relinks": relinks,
                         "segments": score_segments(events, truth)})
         if truth.get("expected"):
@@ -363,8 +461,8 @@ def main():
         with open(a.json, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=1)
     if a.save_video:
-        name, light, cfg = runs[0]
-        save_video(a.video, dets[light], cfg, line, a.save_video, light, keep)
+        name, light, spec, cfg = runs[0]
+        save_video(a.video, dets[(light, spec)], cfg, line, a.save_video, light, keep)
         print(f"\n已导出 {a.save_video}（{name}）")
 
 

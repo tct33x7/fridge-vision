@@ -1,6 +1,6 @@
 # YOLO11s 物体轨迹方向计数 Web Demo
 
-基于 AI 视觉的物品进出计数工具：打开摄像头，YOLO11s 检测物体并用 ByteTrack 追踪轨迹；
+基于 AI 视觉的物品进出计数工具：打开摄像头，YOLO11s 检测物体，追踪器（默认 ByteTrack + 物体光流）把检测框连成轨迹；
 在画面上拖拽一条"计数线"设定正方向，物品沿正方向穿过 +1，反方向 -1，侧边栏实时统计各类物品净数量与进出事件。
 
 ## 环境要求
@@ -30,6 +30,7 @@ python app.py
 ```bash
 python app.py                                   # 默认：摄像头 0，第 2 步优化后的计数逻辑
 python app.py --preset baseline                 # 第 1 步原版逻辑，做对比用
+python app.py --tracker bytetrack               # 换追踪器（默认 bytetrack-oflow，见下面"追踪器"）
 python app.py --source test_videos/jitter1.mp4 --line 0.5,0,0.5,1   # 播放录好的视频（默认循环），启动就画好线
 python app.py --light gain                      # 软件拉平亮度（off / gain / clahe）
 python app.py --lock-exposure --exposure -6     # 尝试关自动曝光（Linux/OrangePi 一般可以，macOS 大多不行）
@@ -39,6 +40,7 @@ python app.py --lock-exposure --exposure -6     # 尝试关自动曝光（Linux/
 |---|---|---|
 | `--source` | `0` | 摄像头编号、视频文件路径，或 http/rtsp 网络流 |
 | `--preset` | `default` | 计数逻辑：`default`（第 2 步）/ `hidden`（门洞上方机位，看不到冰箱里面）/ `baseline`（第 1 步原版） |
+| `--tracker` | `bytetrack-oflow` | 追踪器，见下面"追踪器"一节 |
 | `--light` | `off` | 软件亮度处理：`off` / `gain` / `clahe`。合成视频上没有改善，默认关 |
 | `--lock-exposure` / `--exposure` | 关 | 尝试锁定曝光；结果打印在终端，并显示在 `/api/state` 的 `exposure` 里 |
 | `--line` | 无 | 启动时的计数线 `ax,ay,bx,by`（归一化 0~1） |
@@ -56,9 +58,11 @@ python app.py --lock-exposure --exposure -6     # 尝试关自动曝光（Linux/
 ## 目录结构
 
 ```
-├── app.py               # 后端：YOLO11s + ByteTrack 追踪 + MJPEG 推流（FastAPI）
+├── app.py               # 后端：YOLO11s 检测 + 追踪 + 计数 + MJPEG 推流（FastAPI）
+├── trackers.py          # 检测和追踪：ByteTrack / OC-SORT / BoT-SORT / Deep OC-SORT / 物体光流（app.py 和 replay.py 共用）
 ├── counter.py           # 过线计数逻辑（app.py 和 replay.py 共用）：滞回、平滑、冷却、类别投票、丢失续接
-├── replay.py            # 无界面重放：同一段视频比较不同计数参数的多计 / 漏计
+├── replay.py            # 无界面重放：同一段视频比较不同追踪器、不同计数参数的多计 / 漏计
+├── tools/compare_trackers.py # 几段视频 × 几个追踪器，多计 / 漏计加总
 ├── tools/record.py      # 录测试视频（只录像，不识别）
 ├── tools/make_test_video.py  # 生成合成测试视频 + 真值
 ├── test_videos/         # 录像、真值、检测缓存（不进 git）
@@ -94,7 +98,23 @@ python app.py --lock-exposure --exposure -6     # 尝试关自动曝光（Linux/
 | `birth_zone` | 0 | 0 | 出现在线边时推断来向（试过，会多计，默认关） |
 
 计数规则是"只看最后"：物品最后停在哪一边才算数，拿出又马上放回、晃动时来回过线都不算。
-实拍效果（3 段桌面录像，11 次真实进出）：旧逻辑多计 12、漏计 5 → 新逻辑多计 0、漏计 2；剩下的漏计都是 YOLO 没检测到。详见 E02。
+实拍效果（3 段桌面录像，11 次真实进出）：旧逻辑多计 12、漏计 5 → 新逻辑多计 0、漏计 2（详见 E02）；
+再加物体光流后漏计 1，剩下的是逆光、YOLO 真的没看见（详见 E02b）。
+
+## 追踪器（E02b）
+
+YOLO 每帧只做检测（0.1 分以上的框都留下），再由追踪器把框连成轨迹、给编号。`--tracker` 可选：
+
+| 名字 | 是什么 | E02b 结论 |
+|---|---|---|
+| `bytetrack-oflow`（默认） | ByteTrack + **物体光流**：刚出现的轨迹（不到 5 帧）用光流量出它这一帧实际移动了多少，代替卡尔曼的预测 | 救回"移动太快、前后两帧框不重叠"的漏计；桌面漏计 2→1，合成 3→2，没有新增多计；每帧多约 0.3 ms |
+| `bytetrack` | 原来的 ByteTrack（卡尔曼匀速预测 + 重叠配对） | E02 的结果 |
+| `ocsort` | OC-SORT（"惯性"：按运动方向配对、按最后看到的位置找回） | 少断线，但会把"在原地重新出现"的另一个物体接成同一条轨迹；合成视频漏计 3→31 |
+| `botsort` | BoT-SORT（光流估计**相机**运动并补偿） | 相机固定时没用；光线闪烁时乱估，合成视频漏计 3→18；每帧多 4–9 ms |
+| `botsort-reid` / `deepocsort` | 加外观特征；Deep OC-SORT = OC-SORT + 相机光流 + 外观 | 不比单用好 |
+| `ocsort-flow` / `botsort-flow0` / `ocsort-oflow` / `ocsort-byte` | 对照用的组合 | 见 E02b |
+
+名字后加 `+low`（例如 `bytetrack+low`）表示把 0.1～0.35 的低分框也送进追踪器补配（ByteTrack 论文的做法）。实测低分框类别乱，计数反而变差，不建议开。
 
 ## 重放测试（第 2 步）
 
@@ -136,19 +156,26 @@ cd ~/Projects/bx-project/demos/yolo_web_counter
 `--try-rules` 会在新逻辑上逐个试 `hidden` 预设里的三条规则：`endpoints`（出现、消失时按中心在线的哪一边算，不要求整个框过线）、`relink_moved_only`（只续接动过的轨迹）、`min_travel`（轨迹要移动半个框宽才计数）。
 模拟结果（E02 结果 6）：看不到里面时 `hidden` 比 `default` 好，但里侧只留 5%–10% 画面宽时仍然漏计很多；装相机时线的里侧至少留 20% 画面宽（大于一个物品宽）。
 
-第一次跑会做 YOLO 检测，结果缓存成 `*.dets.json`。之后换参数再跑只要几秒，而且所有方案用的是同一份检测结果。
+第一次跑会做 YOLO 检测，结果（0.1 分以上的框和特征向量）缓存成 `*.raw.npz`。之后换追踪器、换参数再跑只要几秒到几十秒，而且所有方案用的是同一份检测结果。
+
+比较追踪器（E02b）：
+
+```bash
+.venv/bin/python replay.py test_videos/jitter1.mp4 --tracker bytetrack,bytetrack-oflow,ocsort,botsort
+.venv/bin/python tools/compare_trackers.py test_videos/jitter1.mp4 test_videos/light1.mp4 test_videos/mix1.mp4   # 几段视频加总
+```
 
 没有录像时，可以先用合成视频：`.venv/bin/python tools/make_test_video.py test_videos/synthetic.mp4`，然后 `replay.py test_videos/synthetic.mp4 --segments`。
 
 ## API 摘要
 
 - `GET /video`：MJPEG 实时视频流
-- `GET /api/state`：当前统计/事件/状态（含 `line` 计数线坐标、`preset`、`light`、`exposure`）
+- `GET /api/state`：当前统计/事件/状态（含 `line` 计数线坐标、`preset`、`tracker`、`light`、`exposure`）
 - `GET /api/cameras`：枚举摄像头设备名
 - `POST /api/camera`：`{"index": 0}` 或 `{"url": "http://..."}` 切换摄像头
 - `POST /api/line`：`{"ax","ay","bx","by"}`（归一化坐标）设置计数线
 - `POST /api/line/flip | /api/line/clear | /api/reset`：翻转方向 / 清除线 / 计数清零
-- `POST /api/conf`：`{"value": 0.35}` 置信度阈值
+- `POST /api/conf`：`{"value": 0.35}` 置信度阈值（分数 ≥ 这个才能新建轨迹）
 
 ## 已知平台差异
 
