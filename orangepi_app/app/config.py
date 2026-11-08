@@ -51,6 +51,9 @@ COUNTER_ENABLED = os.getenv("SMART_FRIDGE_COUNTER_ENABLED", "true").lower() in {
 COUNTER_MODEL = os.getenv("SMART_FRIDGE_COUNTER_MODEL", str(BASE_DIR / "models" / "yolo11s.pt"))
 COUNTER_IMGSZ = int(os.getenv("SMART_FRIDGE_COUNTER_IMGSZ", "320"))
 COUNTER_CONFIDENCE = float(os.getenv("SMART_FRIDGE_COUNTER_CONFIDENCE", "0.35"))
+# 计数推理引擎: npu = 香橙派 VIPLite NPU + yolov5.nb; cpu = ultralytics yolo11s; auto = 优先 NPU 失败回退 CPU
+COUNTER_ENGINE = os.getenv("SMART_FRIDGE_COUNTER_ENGINE", "auto").lower()
+COUNTER_NPU_MODEL = os.getenv("SMART_FRIDGE_COUNTER_NPU_MODEL", "/opt/yolov5/model/yolov5.nb")
 # 摄像头占用模式：counter = 默认自动计数；manual = 原手动拍照识别
 DEFAULT_CAMERA_MODE = os.getenv("SMART_FRIDGE_DEFAULT_CAMERA_MODE", "counter")
 
