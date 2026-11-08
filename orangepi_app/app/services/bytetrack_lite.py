@@ -96,12 +96,12 @@ class ByteTrackLite:
         iou_h = _iou_matrix(dets[hi], track_boxes)
         rows, cols = _greedy_match(iou_h, self.match_iou)
         hi_idx = np.where(hi)[0]
-        for r, c in zip(rows, cols):
+        for r, c in zip(rows, cols):   # c 已是轨迹索引, 勿再套 cols[c]
             det_i = int(hi_idx[r])
-            t = self.tracks[cols[c]]
+            t = self.tracks[c]
             self._refresh(t, dets[det_i], confs[det_i], clss[det_i])
             assigned[det_i] = t
-            matched_tracks.add(cols[c])
+            matched_tracks.add(c)
 
         # ---- 第二级: 低分检测 vs 剩余轨迹 ----
         remain_idx = [i for i in range(len(self.tracks)) if i not in matched_tracks]
@@ -110,12 +110,12 @@ class ByteTrackLite:
             iou_l = _iou_matrix(dets[lo], remain_boxes)
             rows2, cols2 = _greedy_match(iou_l, self.match_iou)
             lo_idx = np.where(lo)[0]
-            for r, c in zip(rows2, cols2):
+            for r, c in zip(rows2, cols2):   # c 是 iou_l 的列 = remain_idx 内的位置
                 det_i = int(lo_idx[r])
-                t = self.tracks[remain_idx[cols2[c]]]
+                t = self.tracks[remain_idx[c]]
                 self._refresh(t, dets[det_i], confs[det_i], clss[det_i])
                 assigned[det_i] = t
-                matched_tracks.add(remain_idx[cols2[c]])
+                matched_tracks.add(remain_idx[c])
 
         # ---- 未匹配高分检测 -> 新轨迹 ----
         for det_i in np.where(hi)[0]:
