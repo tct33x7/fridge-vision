@@ -11,7 +11,9 @@
   正面机位时人会挡住冰箱，亮度触发不可靠，YOLO 只认出 2/27。
 - **11-08** 和老师定下 **v4**：相机改装到门洞上方，只拍手和手里的东西；库存由用户初始化，之后靠进出事件增减；主机用 OrangePi 4 Pro。
   见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
-- **下一步**：用手机试机位（E02）、让代码支持横线方向、识别手里拿的是什么。日程见 [docs/SCHEDULE.md](docs/SCHEDULE.md)。
+- **11-08 下午** 列出 7 步待办流程（[docs/SCHEDULE.md](docs/SCHEDULE.md)）。第 1 步"电脑端初步的物品进出统计"已完成：
+  [`demos/yolo_web_counter`](demos/yolo_web_counter/)，YOLO11s + ByteTrack，网页上拖线按方向计数。
+- **下一步**：第 2 步，针对光线、物品抖动优化识别；同时尽早在 OrangePi 上测一次帧率。
 
 ## 系统怎么拼起来
 
@@ -29,6 +31,8 @@ smart_fridge_app/   库存后端（FastAPI + SQLite）：初始化、事件、�
 ```
 
 开发在 Mac 上，运行在 OrangePi 4 Pro 上，两边是同一套代码。
+
+上图是 v4 架构里"关门后离线分析"的路线。按 11-08 下午的 7 步计划，识别先用 [`demos/yolo_web_counter`](demos/yolo_web_counter/) 的实时 YOLO11s + ByteTrack 过线计数，两条路线的关系见 [ARCHITECTURE](docs/ARCHITECTURE.md) 开头。
 
 ## 目录地图
 

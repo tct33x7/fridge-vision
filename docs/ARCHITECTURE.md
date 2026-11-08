@@ -3,6 +3,11 @@
 2026-11-08　|　来源：11-08 你和老师在机构定的方向 + 实验 [E01](experiments/E01_front_20261107.md) 的数据 + Claude 的分析
 标"待定"的地方要用实验数据拍板，不靠拍脑袋。上一版（3.0）见 [PROPOSAL.md §3](PROPOSAL.md)，决策来由见 [DECISIONS.md](DECISIONS.md)。
 
+> **11-08 下午更新**：你们列出了 7 步待办流程（[SCHEDULE](SCHEDULE.md)）。识别先走 **YOLO11s + ByteTrack 实时过线计数**
+> （[`demos/yolo_web_counter`](../demos/yolo_web_counter/)，第 1 步已完成），同为 bottle 的饮料用 OCR 区分（第 5 步）。
+> 本文 §2、§5 写的"开门录像、关门后离线分析 + 类别无关 + 大模型认名"留作对照路线；机位（§3）、触发（§4）、库存（§6）、主机与界面（§7）两条路线都适用。
+> 实时路线要先验证两件事：**YOLO 认不出的长尾物品**（E01 召回 2/27，第 4、7 步测）和 **OrangePi 上的帧率**（第 6 步，建议提前测）。
+
 ## 0. 一句话
 
 冰箱开门时，装在**门洞上方**的相机只拍门口这一截：手往里伸、往外拿的那一下。关门后离线分析出"放入 / 拿出 · 什么 · 几件"，
@@ -158,7 +163,8 @@ eMMC / M.2 NVMe / TF 卡、Wi-Fi 6、千兆网口、HDMI 2.0、MIPI 屏和 MIPI 
 | --- | --- | --- |
 | 采集 | `fridge_vision/record_sessions.py`（+ `run_record.command`） | 横线方向修正；门磁触发；无窗口运行；环形缓冲 |
 | 分析 | `fridge_vision/process_session.py`、`name_keyframes.py`、`vlm.py` | 横线方向；按"腿"判断手里有无和是什么；关门后自动跑 |
-| 评测 | `fridge_vision/analyze_sessions.py`、各 `summary.md`、人工表 | 导入手机录像 `import_clip.py`（待写）；E01 / E02 对比表 |
+| 电脑端识别（当前路线） | `demos/yolo_web_counter/` | 第 1 步已完成；第 2–5 步在它上面做（光线和抖动、待机自启动、复杂情况、OCR），第 6 步合并进主功能 |
+| 评测 | `fridge_vision/analyze_sessions.py`、各 `summary.md`、人工表 | 导入手机录像 `import_clip.py`（待写）；E01 / E03 对比表 |
 | 后端 | `smart_fridge_app/` | 初始化库存（复用拍照录入）；事件状态 confirmed / wrong；按大模型名字定类别 |
 | 界面 | `smart_fridge_app/frontend/` | "刚才的变化" + 对 / 错 / 改；初始化向导；对账页 |
 | 主机部署 | [deploy/](../deploy/)（新，待写） | OrangePi 装机、锁曝光、门磁、开机自启、小屏全屏 |
@@ -194,6 +200,8 @@ eMMC / M.2 NVMe / TF 卡、Wi-Fi 6、千兆网口、HDMI 2.0、MIPI 屏和 MIPI 
 - [ ] 冷冻抽屉纳不纳入
 - [ ] Moertek 2.4G 相机到货后换不换（接收器是不是 UVC、延迟多少）
 - [ ] 大模型 API 密钥
+- [ ] 实时 YOLO（当前路线）在 OrangePi 上帧率够不够；不够时选 yolo11n、降到 320、用 NPU，还是改成关门后离线分析
+- [ ] YOLO 认不出的长尾物品（蓝莓、萝卜干酸菜、辣椒酱这类）怎么处理：看第 4、7 步的数据
 
 ## 11. 预留：以后可能加的
 
