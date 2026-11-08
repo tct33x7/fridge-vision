@@ -36,3 +36,6 @@ fridge_vision/*.pt
 
 # demo 自带的通用预训练权重（19MB，COCO，非自训）需要提交
 !demos/yolo_web_counter/models/yolo11s.pt
+
+# 个人资料（只在本机，永不进 git）
+private/

@@ -3,7 +3,7 @@
 v4（[ARCHITECTURE](../docs/ARCHITECTURE.md)）要做的硬件放在这里。旧项目的手持扫码枪外壳在 [archive/hardware/](../archive/hardware/)，不再使用，
 但其中的建模流程（OpenSCAD / Fusion 360 → STL → 打印）可以照搬。
 
-这一块适合由你亲手完成：设计、打印、安装、拍照记录，都是报告里属于你自己的部分。
+这一块由项目成员动手完成：设计、打印、安装，并给每一版拍照留档。
 
 ## 计划的子目录
 
