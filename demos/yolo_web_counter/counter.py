@@ -7,7 +7,7 @@
 
 两套参数：
 - PRESETS["baseline"]：第 1 步原版逻辑（6 像素滞回，看到换边就计）。
-- PRESETS["default"]：第 2 步优化后（平滑、最短轨迹、滞回带、冷却、类别投票、丢失后续接）。
+- PRESETS["default"]：第 2 步优化后（滞回带、丢失后续接、类别投票 + 事后改类别、平滑、最短轨迹、冷却）。
 """
 import math
 from collections import Counter, deque
@@ -28,6 +28,11 @@ class CounterConfig:
     relink_frames: int = 0           # 目标丢失后多少帧内，附近出现的新编号算同一个目标（接上它的"从哪边来"和类别票）
     relink_dist: float = 0.0         # 续接距离上限 = 目标框对角线 × 这个倍数
     track_timeout: int = 60          # 连续多少帧没看到就删掉轨迹
+    revote: bool = False             # 计数之后继续投票，类别变了就改正已经记下的事件（要配合 class_vote）
+    # 出生推断（试过，默认关）：在 E02 的合成视频和 mix1 上各多计 1–2 次，也没救回 jitter1 的快速苹果
+    birth_zone: float = 0.0          # 新目标第一次出现时离线很近（滞回带外 这么多倍框宽以内）……
+    birth_frames: int = 8            # ……并且在这么多帧内继续往远离线的方向走，
+    birth_move: float = 0.3          # ……走了 这么多倍框宽，就推断它是从线另一边快速穿过来的，补计一次。0=关
 
 
 PRESETS = {
@@ -40,7 +45,8 @@ PRESETS = {
         cooldown_frames=15,
         class_vote=True,
         relink_frames=20,
-        relink_dist=1.5,
+        relink_dist=2.0,
+        revote=True,
     ),
 }
 
@@ -51,7 +57,8 @@ def get_config(name="default", **overrides):
 
 class _Track:
     __slots__ = ("cls_now", "votes", "trail", "pos", "side", "seen", "last_seen",
-                 "last_count", "line_epoch", "box", "lost_at")
+                 "last_count", "line_epoch", "box", "lost_at", "relinked",
+                 "birth_side", "birth_proj", "birth_frame")
 
     def __init__(self, trail_len):
         self.cls_now = None
@@ -65,6 +72,10 @@ class _Track:
         self.line_epoch = -1
         self.box = (0.0, 0.0)            # 宽、高
         self.lost_at = None
+        self.relinked = False
+        self.birth_side = 0              # 出生推断：等待中的那一侧（0 = 没在等）
+        self.birth_proj = 0.0
+        self.birth_frame = 0
 
 
 class LineCounter:
@@ -74,6 +85,9 @@ class LineCounter:
         self.tracks = {}          # 当前编号 -> _Track
         self.line_epoch = 0
         self.relinks = 0
+        self.open_events = []     # [(事件, 轨迹)]：轨迹还活着，类别可能还会被改正
+        self.corrections = []     # 本帧改正了类别的事件 [(事件, 旧类别, 新类别)]
+        self.birth_counts = 0
 
     # ---------- 工具 ----------
     def label(self, t):
@@ -120,6 +134,7 @@ class LineCounter:
                 t = self._try_relink(cls, cx, cy, w, h, frame_no)
                 if t is not None:
                     self.relinks += 1
+                    t.relinked = True
                 else:
                     t = _Track(self.trail_len)
                 self.tracks[tid] = t
@@ -146,20 +161,43 @@ class LineCounter:
                 continue
             ax, ay, _, _, _, _, nx, ny = gate
             proj = (t.pos[0] - ax) * nx + (t.pos[1] - ay) * ny
-            hyst = c.hysteresis_px + c.hysteresis_box * (abs(w * nx) + abs(h * ny))
+            wn = abs(w * nx) + abs(h * ny)            # 框沿过线方向的宽度
+            hyst = c.hysteresis_px + c.hysteresis_box * wn
             side = 1 if proj > hyst else (-1 if proj < -hyst else 0)
 
-            if t.line_epoch != line_epoch:            # 新画了线：只记录在哪一侧，不计数
-                t.side = side if side != 0 else t.side
+            if t.line_epoch != line_epoch:            # 新画了线 / 新目标：只记录在哪一侧，不计数
                 t.line_epoch = line_epoch
+                if (c.birth_zone > 0 and t.seen == 1 and not t.relinked and side != 0
+                        and abs(proj) <= hyst + c.birth_zone * wn):
+                    # 新目标第一次出现就在线边上：先不定它在哪一侧，看接下来往哪走
+                    t.birth_side, t.birth_proj, t.birth_frame = side, abs(proj), frame_no
+                else:
+                    t.side = side if side != 0 else t.side
                 continue
+            if t.birth_side:
+                if side == t.birth_side and abs(proj) >= t.birth_proj + c.birth_move * wn:
+                    # 出现在线边、又继续远离线：推断是从另一边快速穿过来的（检测器没赶上）
+                    delta = t.birth_side
+                    ev = {"frame": frame_no, "tid": tid, "cls": self.label(t), "delta": delta, "inferred": True}
+                    events.append(ev)
+                    self.open_events.append((ev, t))
+                    self.birth_counts += 1
+                    t.last_count = frame_no
+                    t.side, t.birth_side = side, 0
+                    continue
+                if side == -t.birth_side or frame_no - t.birth_frame > c.birth_frames:
+                    t.side, t.birth_side = t.birth_side, 0   # 往线走 / 停住了：当作普通目标
+                else:
+                    continue
             if side == 0:
                 continue
             if t.side != 0 and side != t.side:
                 ready = t.seen >= c.min_frames and frame_no - t.last_count >= c.cooldown_frames
                 if ready:
                     delta = 1 if side > t.side else -1
-                    events.append({"frame": frame_no, "tid": tid, "cls": self.label(t), "delta": delta})
+                    ev = {"frame": frame_no, "tid": tid, "cls": self.label(t), "delta": delta}
+                    events.append(ev)
+                    self.open_events.append((ev, t))
                     t.last_count = frame_no
                     t.side = side
                 # 没准备好（太短/冷却中）：不计数，也不更新所在侧，等它稳定后再判断
@@ -173,6 +211,21 @@ class LineCounter:
                     t.lost_at = frame_no
                 if frame_no - t.last_seen > c.track_timeout:
                     del self.tracks[tid]
+
+        # 事后改类别：轨迹还活着时继续投票，票数变了就改正已记下的事件
+        self.corrections = []
+        if c.revote and c.class_vote and self.open_events:
+            alive = set(self.tracks.values())
+            keep = []
+            for ev, t in self.open_events:
+                new = self.label(t)
+                if new != ev["cls"]:
+                    self.corrections.append((ev, ev["cls"], new))
+                    ev.setdefault("cls_at_cross", ev["cls"])
+                    ev["cls"] = new
+                if t in alive:
+                    keep.append((ev, t))
+            self.open_events = keep
         return events, visible
 
 

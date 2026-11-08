@@ -237,11 +237,17 @@ def worker():
 
             # ---- 方向计数（逻辑在 counter.py）----
             events, visible = counter.update(dets, frame_no, gate, line_epoch)
-            if events:
+            if events or counter.corrections:
                 with S.lock:
                     for e in events:
+                        e["t"] = now_str              # 事件字典和计数器共用，事后改类别时流水里也跟着改
                         S.counts[e["cls"]] += e["delta"]
-                        S.events.append({"t": now_str, "cls": e["cls"], "delta": e["delta"]})
+                        S.events.append(e)
+                    for e, old, new in counter.corrections:   # 事后改类别：把计数从旧类别挪到新类别
+                        S.counts[old] -= e["delta"]
+                        S.counts[new] += e["delta"]
+                        if S.counts[old] == 0:
+                            del S.counts[old]
 
             # ---- 绘制 ----
             for tid, cls, p, x1, y1, x2, y2 in dets:
@@ -406,7 +412,7 @@ def state():
             "conf": S.conf,
             "n_tracks": S.n_tracks,
             "counts": counts,
-            "events": list(S.events)[-30:][::-1],
+            "events": [{"t": e["t"], "cls": e["cls"], "delta": e["delta"]} for e in list(S.events)[-30:][::-1]],
         }
 
 

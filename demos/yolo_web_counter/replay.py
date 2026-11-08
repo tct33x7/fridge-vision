@@ -224,6 +224,7 @@ ABLATE_KEYS = {
     "冷却": {"cooldown_frames": 0},
     "类别投票": {"class_vote": False},
     "丢失后续接": {"relink_frames": 0},
+    "事后改类别": {"revote": False},
 }
 
 
@@ -269,6 +270,8 @@ def main():
             on = {k: getattr(full, k) for k in off}
             if name == "丢失后续接":
                 on["relink_dist"] = full.relink_dist
+            if name == "事后改类别":
+                on["class_vote"] = True
             runs.append((f"baseline + 只开「{name}」", lights[0], replace(base, **on)))
         for name, off in ABLATE_KEYS.items():
             runs.append((f"default − 关掉「{name}」", lights[0], replace(full, **off)))
