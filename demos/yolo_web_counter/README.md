@@ -38,7 +38,7 @@ python app.py --lock-exposure --exposure -6     # 尝试关自动曝光（Linux/
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `--source` | `0` | 摄像头编号、视频文件路径，或 http/rtsp 网络流 |
-| `--preset` | `default` | 计数逻辑：`default`（第 2 步）/ `baseline`（第 1 步原版） |
+| `--preset` | `default` | 计数逻辑：`default`（第 2 步）/ `hidden`（门洞上方机位，看不到冰箱里面）/ `baseline`（第 1 步原版） |
 | `--light` | `off` | 软件亮度处理：`off` / `gain` / `clahe`。合成视频上没有改善，默认关 |
 | `--lock-exposure` / `--exposure` | 关 | 尝试锁定曝光；结果打印在终端，并显示在 `/api/state` 的 `exposure` 里 |
 | `--line` | 无 | 启动时的计数线 `ax,ay,bx,by`（归一化 0~1） |
@@ -133,7 +133,8 @@ cd ~/Projects/bx-project/demos/yolo_web_counter
 ```
 
 模拟"看不到冰箱里面"（门洞上方机位）：`--keep 0.4,0,1,1` 只保留画面 x 从 0.4 到 1 这一块，其余涂黑再检测（线在 0.5 时，里侧只剩 0.1 宽）。
-`--try-rules` 会在新逻辑上试"压线消失也算 / 压线出现也算"两条规则（`edge_in` / `edge_out`，默认关，还在测试）。
+`--try-rules` 会在新逻辑上逐个试 `hidden` 预设里的三条规则：`endpoints`（出现、消失时按中心在线的哪一边算，不要求整个框过线）、`relink_moved_only`（只续接动过的轨迹）、`min_travel`（轨迹要移动半个框宽才计数）。
+模拟结果（E02 结果 6）：看不到里面时 `hidden` 比 `default` 好，但里侧只留 5%–10% 画面宽时仍然漏计很多；装相机时线的里侧至少留 20% 画面宽（大于一个物品宽）。
 
 第一次跑会做 YOLO 检测，结果缓存成 `*.dets.json`。之后换参数再跑只要几秒，而且所有方案用的是同一份检测结果。
 

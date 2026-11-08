@@ -47,7 +47,7 @@ def parse_args(argv=None):
     ap.add_argument("--source", default="0",
                     help="摄像头编号(0)、视频文件路径、或 http/rtsp 网络流；默认 0")
     ap.add_argument("--preset", default="default", choices=sorted(PRESETS),
-                    help="计数逻辑：default=第 2 步优化后，baseline=第 1 步原版")
+                    help="计数逻辑：default=第 2 步优化后，hidden=看不到冰箱里面时（门洞上方机位），baseline=第 1 步原版")
     ap.add_argument("--light", default="off", choices=["off", "gain", "clahe"],
                     help="软件亮度处理：off 不处理 / gain 拉平整体亮度 / clahe 局部均衡")
     ap.add_argument("--lock-exposure", action="store_true",

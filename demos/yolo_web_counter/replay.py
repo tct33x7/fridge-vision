@@ -245,9 +245,10 @@ ABLATE_KEYS = {
 }
 # 不在 default 里、单独试的规则：--try-rules 时在 default 上逐个打开
 TRY_RULES = {
-    "压线消失也算": {"edge_in": True},
-    "压线出现也算": {"edge_out": True},
-    "两条都开": {"edge_in": True, "edge_out": True},
+    "出现消失按中心所在边": {"endpoints": True},
+    "只续接动过的": {"relink_moved_only": True},
+    "要求移动半个框宽": {"min_travel": 0.5},
+    "三条都开": {"endpoints": True, "relink_moved_only": True, "min_travel": 0.5},
 }
 
 
@@ -265,7 +266,7 @@ def main():
     ap.add_argument("--cache-dir", help="检测缓存放哪；默认和视频同一个文件夹")
     ap.add_argument("--max-frames", type=int)
     ap.add_argument("--ablate", action="store_true", help="逐项关掉 / 单独打开每个优化，看各自作用")
-    ap.add_argument("--try-rules", action="store_true", help="在 default 上试 压线消失 / 压线出现 两条规则")
+    ap.add_argument("--try-rules", action="store_true", help="在 default 上逐个试 看不到冰箱里面时用的规则")
     ap.add_argument("--segments", action="store_true", help="逐段显示结果（真值里有 segments 时）")
     ap.add_argument("--save-video", help="导出带框和计数的视频（用第一个 preset 和第一个 light）")
     ap.add_argument("--class-noise", type=float, default=0.0,
