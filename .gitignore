@@ -39,3 +39,8 @@ fridge_vision/*.pt
 
 # 个人资料（只在本机，永不进 git）
 private/
+
+# 第 2 步测试录像和检测缓存（本机重放用，不进 git）
+demos/yolo_web_counter/test_videos/
+*.mp4
+*.mov
