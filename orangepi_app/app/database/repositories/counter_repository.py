@@ -59,6 +59,14 @@ def list_events(connection: sqlite3.Connection, limit: int = 50) -> list[dict[st
         (_last_reset_id(connection), RESET_MARKER, max(1, min(limit, 200))),
     ).fetchall()
     return [
-        {"cls": row["cls"], "delta": int(row["delta"]), "created_at": row["created_at"]}
+        {"t": _display_time(row["created_at"]), "cls": row["cls"], "delta": int(row["delta"])}
         for row in rows
     ]
+
+
+def _display_time(iso: str) -> str:
+    """ISO 时间串 -> HH:MM:SS（与内存事件格式一致, 失败原样返回）"""
+    try:
+        return iso.split("T")[1][:8]
+    except (IndexError, AttributeError, TypeError):
+        return str(iso)
