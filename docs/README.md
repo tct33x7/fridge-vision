@@ -7,6 +7,7 @@
 | 文档 | 是什么 |
 | --- | --- |
 | [根目录 README](../README.md) | 现在到哪了、系统怎么拼起来、目录地图、常用命令 |
+| [progress/](progress/) | **进度总结**，按日期一份：做到哪、数据、风险、下一步 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | **系统架构 v4**（11-08）：门洞上方相机、识别流程、库存、主机与界面、待定问题 |
 | [SCHEDULE.md](SCHEDULE.md) | 日程：到 11-22 可交付、11-29 打磨 |
 | [DECISIONS.md](DECISIONS.md) | 决策日志：每个决定是谁提的、依据是什么、验证了没有 |
