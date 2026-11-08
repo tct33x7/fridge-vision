@@ -1,70 +1,62 @@
 # 交接文档（给下一个 chat / 下一个人）
 
-更新：2026-11-07 19:40（周六晚）。仓库 `~/Projects/bx-project`，分支 main，工作树干净。
+更新：2026-11-08 中午（周日，你在机构）。仓库 `~/Projects/bx-project`，分支 `main`；GitHub 私有仓库 [tct33x7/fridge-vision](https://github.com/tct33x7/fridge-vision)。
 
 ## 一句话
 
-家用纯视觉冰箱记账：门口相机，开门自动记录放进去、拿出来的食材，不扫码不拍照，能用数字说明自己多准。
-**真正目的是美国高中申请**：要有故事、有数据、经得起追问；把难点做好，不做全。可交付版本 11-22，打磨 11-29。
+冰箱门口自动记账：门洞上方的相机拍下手往里放、往外拿的东西，关门后判断"放入 / 拿出 · 什么 · 几件"，更新库存，并且能用数字说明有多准。
+**真正目的是美国高中申请**：要有故事、有数据、经得起追问；把难点做好，不做全。可交付版本 11-22，打磨到 11-29。
 
 ## 先读什么
 
-1. `docs/PROPOSAL.md` 3.0：§0 改了什么、§2 对申请意味着什么、§4 评测方法、§6 新构思、§9 日程与"今天 / 明天结束时应该有"。
-2. `docs/SCHEDULE.md`：今晚按小时、明天机构 8 小时按小时、之后按周。
-3. `docs/DECISIONS.md`：谁定的、依据、验证状态；`docs/BLIND_REVIEW.md`：独立盲审原文（方法论来源）。
-4. `README.md`：快速启动与 GitHub 协作约定。
+1. [docs/README.md](README.md)：文档目录。
+2. [docs/ARCHITECTURE.md](ARCHITECTURE.md)：**v4 架构**（11-08），尤其 §3 机位的七个问题、§10 待定。
+3. [docs/SCHEDULE.md](SCHEDULE.md)：今天下午和之后的安排。
+4. [docs/DECISIONS.md](DECISIONS.md) 的 11-08 各行；[docs/experiments/E01_front_20261107.md](experiments/E01_front_20261107.md)。
+5. [docs/PROPOSAL.md](PROPOSAL.md) 3.0 的 §2（对申请意味着什么）、§4（评测方法）：方法论仍然有效。
 
 ## 现在的状态
 
-- **方法**：先测量后设计。今晚录真实开关门 + 手记真值；明天用数字拍板架构（倾向：类别无关过线 + 大模型认名 + 人工纠错，关门后离线分析；YOLO 退为辅助）。
-- **工具已就绪并提交**（全在 `fridge_vision/`，用 `.venv/bin/python`）：
-  - `record_sessions.py` / `run_record.command`：开门录整段 + 过线关键帧 + 关门后终端问真值 → `runs/sessions/<id>/{clip.mp4, kf_*.jpg, session.json}`。
-  - `analyze_sessions.py --contact`：`runs/sessions/summary.md`（触发误/超时、可见率、YOLO 召回、物品清单）+ 每会话 `contact.jpg`。
-  - `name_keyframes.py`：关键帧批量交大模型认名，与真值比 → `naming.json`、`naming_summary.md`（含待人工分类的失败表）。要 `VLM_API_KEY`；`--dry-run` 预览，`--fake` 离线跑通。**真实 API 路径未验证**（没密钥）。
-  - `process_session.py`：离线链路，运动段 → 光流方向 → 往返配对 → 认名（naming.json → YOLO → 无）→ 事件 → `events.json`、`events_summary.md`（动作检出 / 次数一致 / 方向一致 / 空开门有动作）；`--post-url http://127.0.0.1:8000` 上报后端。合成夹具全对，**真实手部画面未验证**；`--fridge-side left|right` 按画面里冰箱在哪边。
-  - 对照组：`door_demo.py`（YOLO + ByteTrack + 实时过线）与 `run_fridge.command`。
-- **后端** `smart_fridge_app/`：FastAPI + SQLite，`door_events` 接口（POST/GET/undo/PATCH）、按类别保质期；34 个测试；`run_backend.command` 启动，手机同一 Wi-Fi 打开 `http://<Mac IP>:8000`。
-- **硬件**：Mac 是唯一主机。外接相机 UGREEN UVC 1080p 已到手并可用，**今晚在 OpenCV 里的编号是 0**（`SOURCE=0`），自带相机编号可能变成 1；换口可能变，不对就试 1、2。Moertek 2.4G 相机和 N100 已下单未到，N100 退出主线。
-- **数据**：`runs/sessions/` 截至 19:40 仍为空。
+- **方向**：v4，11-08 你和老师定的。相机改装到门洞上方，只拍手和手里的东西；库存由用户初始化（手动输入或拍照），之后靠进出事件增减；主机 OrangePi 4 Pro，Mac 继续做开发机；界面在门边小屏和手机之间待定（Claude 建议同一套网页、手机先）。
+- **数据**：E01 在 `fridge_vision/runs/e01_front_20261107/`（16 个会话，真值 11-07 21:35 已修正，原始输入在 `truth_original`）。
+  **待你做**：`人工可见性.md`（27 行，新增"放在哪"一列）、11-07 日志（还是模板）。
+- **工具**（`fridge_vision/`，用 `.venv/bin/python`）：`record_sessions.py`、`analyze_sessions.py`、`name_keyframes.py`（真实 API 没跑过，缺密钥）、`process_session.py`。
+  **已知问题**：不支持横线方向（门洞上方机位必需）；"时长"含填真值的时间；YOLO 检测只存 400 条。见 [fridge_vision/README.md](../fridge_vision/README.md)。
+- **后端** `smart_fridge_app/`：34 个测试通过（11-08 复核），已有门事件接口和拍照录入会话（可用于初始化库存）。
+- **硬件**：UGREEN 有线相机在 Mac 上编号 0；OrangePi 4 Pro 已有（还没装机）；Moertek 2.4G 相机已下单；N100 退出主线；门磁待定。
+- **GitHub**：推送靠 macOS 钥匙串里 `tct33x7` 账号的凭据，`git push` 直接可用。`gh` 命令行**没登录**：登录时报"账号 API 限额已用完"（user ID 326270814），原因不明；你另一个项目在用一把旧令牌。加协作者用网页（Settings → Collaborators）。
+  公开接口查不到 `tct33x7` 这个账号，可能被 GitHub 标记了：加协作者前在无痕窗口打开 github.com/tct33x7 确认。
 
-## 今晚剩余（按顺序）
+## 下一步
 
-录制一律在 macOS 自带"终端"App 里跑（Claude 里的终端没有相机权限）。
-
-1. 启动：`SOURCE=0 ~/Projects/bx-project/fridge_vision/run_record.command`。触发不跟就加 `DELTA=12`；再不行画面窗口按 `o` 手动开/关。
-2. 录到 20:30，目标 15–25 次、底线 10 次：自然使用 + 空开门 3 次（两次回车）+ 只拿出 3 次 + 只放入 5 次（备注"练习"）+ 一次两样 2 次。按键在画面窗口，打字在终端窗口。
-3. 统计：`cd ~/Projects/bx-project/fridge_vision && .venv/bin/python analyze_sessions.py --contact`，然后让助手读 `runs/sessions/summary.md` 分析，并跑 `process_session.py --dry-run` 看方向数字（先确认 `--fridge-side`）。
-4. 日志 `docs/journal/2026-11-07.md`，三个问题各两三句，自己的话。
-5. GitHub（可挪到明天）：`~/.local/bin/gh auth login --web`，然后 `cd ~/Projects/bx-project && ~/.local/bin/gh repo create fridge-vision --private --source=. --remote=origin --push`；设私有，老师同学加协作者。
-
-明天之前的底线：≥ 10 个有真值的会话 + `summary.md` + 日志 5 句。
-
-## 明天（11-08，机构 8 小时）
-
-带 Mac、充电器、有线相机；录像在 Mac 里。开场问老师：多模态大模型 API 密钥（通义千问百炼或任何 OpenAI 兼容接口，设 `VLM_API_KEY` / `VLM_BASE_URL` / `VLM_MODEL`）；N100 到没到；有没有门磁 + ESP32/Arduino。逐小时安排见 `docs/SCHEDULE.md`：定架构 → 认名正确率与失败分类 → 离线链路跑通一次并入库 → 报告 1–3 节 → 录屏 → 下周计划。
+- **你**：见 [SCHEDULE 11-08 下午](SCHEDULE.md)：补日志、问老师四件事、做"假门洞"练识别、OrangePi 装机前几步、E01 人工表。
+- **Claude（代码，走分支 + PR）**，按顺序：
+  1. 横线方向：`record_sessions.py` 的 `--axis y` 重心；`process_session.py` 加 `--axis`。
+  2. `import_clip.py`：手机录像 → 会话文件夹，给 E02 试机位用。
+  3. 按"腿"判断手里有无和是什么（每腿 2–4 帧问大模型，带家庭词表）。
+  4. 门磁触发、无窗口运行、环形缓冲、关门后自动分析。
+  5. 后端：事件状态 `confirmed / wrong`、按大模型名字定类别和保质期、初始化向导、"刚才的变化"页。
 
 ## 铁律
 
-- `runs/`（家里录像）、`.env`、`archive/smart_fridge_demo/config/api_settings.json`（含真实 DeepSeek 密钥，建议轮换）、数据库，永远不提交、不推送。`.gitignore` 已覆盖。
-- iCloud 里和 `~/Downloads/HiddenadminAll/BX Project` 里的原件不动。
-- 提交信息中文，说明"做了什么"；文档直接提交，代码改动以后走分支。
-- 用户是中学生，所有文字中文；给出的每一步要可直接照做，并给替代方案；不替用户写日志和报告正文，只给结构。
-
-## 已知问题（盲审指出、已核对，11-08 架构定了再改）
-
-大模型名字未真正用作 `label_zh` 和商品名；改名后类别/保质期仍按原英文标签；`door_events.status` 缺 `confirmed/wrong`；证据图 RESTRICT 与清理冲突；"拿出"自动扣减应先隐藏；类别表要按家里清单重做；`door_demo.py` 的开门检测在厨房灯下会锁死（`record_sessions.py` 已有超时重置，`door_demo.py` 没有）。
+- `fridge_vision/runs/`（家里录像）、`.env`、密钥、数据库，永远不提交、不推送。`.gitignore` 已覆盖。
+- `archive/smart_fridge_demo/config/api_settings.json` 有真实 DeepSeek 密钥（不在 git 里），建议轮换。
+- iCloud 和 `~/Downloads/HiddenadminAll/BX Project` 里的原件不动。
+- 提交信息用中文，写清做了什么。改代码走分支 + PR，改文档可以直接提交到 `main`。
+- 用户是中学生，所有文字用中文；每一步给可以直接照做的命令，并附替代方案；**不替用户写日志和报告正文**，只给结构。
+- 录制在 macOS 自带的"终端"里跑（Claude 里的终端没有相机权限），外接相机 `SOURCE=0`。
 
 ## 在线资料
 
-- 计划书在线版（与 `docs/PROPOSAL.md` 同步，可导出 Word/PDF）：https://claude.ai/artifact/5FRAXpgANS4yXgAqxmwiwy（Claude Docs，doc id `2267dbf5-dd37-4279-b08c-1c7de35ff548`，tab `6acd8b36-a9d0`，正文节点 `5accd51a-7c50`，rev 48）。
+- 计划书在线版（Claude Docs，停在 3.0，**没有同步 v4**）：https://claude.ai/artifact/5FRAXpgANS4yXgAqxmwiwy（doc id `2267dbf5-dd37-4279-b08c-1c7de35ff548`）。
 - GitHub CLI 装在 `~/.local/bin/gh`（Homebrew 目录属于别的账号，装不了）。
 
 ## 下一个 chat 开场 prompt（复制粘贴，补上方括号里的内容）
 
 ```text
-我们在做 ~/Projects/bx-project（家用纯视觉冰箱记账，真正目的是美国高中申请：有故事、有数据、把难点做好不做全）。
-先读 docs/HANDOFF.md，再读 docs/SCHEDULE.md 和 docs/PROPOSAL.md 的 §0、§4、§9，然后按 HANDOFF 的"今晚剩余"或"明天"继续，不要重新规划。
-现在是 [时间]，我刚 [录完 N 次会话 / 在机构，老师给了密钥 / …]。
+我们在做 ~/Projects/bx-project（冰箱门口自动记账，真正目的是美国高中申请：有故事、有数据、把难点做好不做全）。
+先读 docs/HANDOFF.md，再读 docs/ARCHITECTURE.md 和 docs/SCHEDULE.md，然后按 HANDOFF 的"下一步"继续，不要重新规划。
+现在是 [时间]，我刚 [做完了什么 / 老师说了什么 / 拿到了什么]。
 规则：所有文字中文；每一步给可直接照做的命令并附替代方案；录制在系统"终端"跑，外接相机 SOURCE=0；永远不提交 runs/、.env、密钥、数据库；不替我写日志和报告正文。
 先告诉我接下来 30 分钟具体做什么。
 ```

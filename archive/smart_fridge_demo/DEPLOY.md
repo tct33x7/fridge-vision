@@ -1,3 +1,5 @@
+> 2026-11-08 从仓库根目录移到这里：它只服务于已归档的 `smart_fridge_demo` 云部署，家用方案不需要。命令里的路径仍按仓库根目录写。
+
 > 2026-11-06：方案已改为家用纯视觉，不再需要云部署。本文和 Docker 文件随 demo 一起归档在 `archive/smart_fridge_demo/`，留作以后参考。
 
 # 云端部署（smart_fridge_demo）
@@ -92,7 +94,7 @@ cd archive/smart_fridge_demo && ./install.sh && cp .env.example .env
 ```
 
 编辑 `.env` 填 `DEEPSEEK_API_KEY` 并把 `SMART_FRIDGE_GPIO_BUTTON_ENABLED` 改成 `false`，然后按
-[README 第 6 节](archive/smart_fridge_demo/README.md) 安装 `smart-fridge.service`。
+[README 第 6 节](README.md) 安装 `smart-fridge.service`。
 
 ## 部署后验收清单
 

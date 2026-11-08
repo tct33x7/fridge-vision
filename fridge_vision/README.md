@@ -1,104 +1,75 @@
-# fridge_vision · 冰箱门口纯视觉记账
+# fridge_vision · 门口视觉
 
-摄像头看着冰箱门口，门一开就追踪手里的物品；物品穿过画面上的虚拟线，按方向判定"放入"或"拿出"，
-保存关键帧并写事件。先在 Mac 上跑通，再搬到 N100 迷你主机。
+开门时录像，关门后离线分析出"放入 / 拿出 · 什么 · 几件"，并且能和真值对比算准确率。v4 设计见 [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)。
 
-## 安装（Mac）
+## 主线工具
 
-```bash
-cd fridge_vision && python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt
-```
+| 脚本 | 做什么 | 输出（在会话文件夹或实验文件夹里） |
+| --- | --- | --- |
+| `record_sessions.py`（双击用 `run_record.command`） | 开门录整段 + 过线关键帧 + 关门后在终端问真值 | `<会话>/clip.mp4`、`kf_*.jpg`、`session.json` |
+| `analyze_sessions.py` | 统计：触发、可见率（脚本口径）、YOLO 召回、物品清单；`--contact` 每会话一张拼图 | `summary.md`、`<会话>/contact.jpg` |
+| `name_keyframes.py`（调用 `vlm.py`） | 关键帧交给多模态大模型认名，和真值比 | `<会话>/naming.json`、`naming_summary.md` |
+| `process_session.py` | 离线链路：运动段 → 光流方向 → 往返配对 → 认名 → 事件；可上报后端 | `<会话>/events.json`、`events_summary.md` |
+| `list_cameras.py` | 列出摄像头编号 | — |
 
-## 接 Moertek 2.4G 摄像头
+## 常用命令
 
-接收器插上 Mac 后先找编号（内置摄像头是 0，接收器一般是 1）：
-
-```bash
-.venv/bin/python list_cameras.py
-```
-
-然后把编号传给 `--source`：
+都在这个目录里运行。录制必须在 macOS 自带的"终端" App 里跑（要相机权限），外接相机编号是 0。
 
 ```bash
-.venv/bin/python door_demo.py --source 1 --trigger manual --model yolo11n.pt
+SOURCE=0 ~/Projects/bx-project/fridge_vision/run_record.command --trigger manual --out-dir runs/e03_overhead_20261114
 ```
 
-## 跑 demo
-
-笔记本摄像头，按 `o` 模拟开门/关门（桌面上没有冰箱灯，自动检测不好触发）：
+开门前、关门后在画面窗口各按一次 `o`，关门后切到终端填三行真值；`q` 退出。参数（`--line`、`--band`、`--axis`）记在实验记录里，分析时要传同样的值。
 
 ```bash
-.venv/bin/python door_demo.py --trigger manual
+.venv/bin/python analyze_sessions.py runs/e01_front_20261107 --contact
 ```
-
-用 COCO 通用模型（瓶子、杯子、碗、香蕉、苹果、橙子都认，拿身边东西演示更方便；首次会下载 5 MB）：
 
 ```bash
-.venv/bin/python door_demo.py --trigger manual --model yolo11n.pt
+.venv/bin/python process_session.py runs/e01_front_20261107 --dry-run --line 0.55 --band 0.50
 ```
 
-默认线是画面中间的水平线，**从下往上**过线算放入（摄像头装在冰箱顶部朝下看时，东西从门口进去就是这个方向）。
-方向反了按 `l` 切换，或者加 `--in-dir down`。
-
-过线后把关键帧发给大模型确认名字和数量（通义千问百炼的 OpenAI 兼容接口，其他兼容接口改 `VLM_BASE_URL`）：
+认名需要密钥（通义千问百炼或任何 OpenAI 兼容接口）：设 `VLM_API_KEY`，可选 `VLM_BASE_URL`、`VLM_MODEL`。先用 `--dry-run` 看会发多少张，没有密钥时用 `--fake` 跑通流程。
 
 ```bash
-VLM_API_KEY=sk-xxx .venv/bin/python door_demo.py --trigger manual --model yolo11n.pt --vlm
+.venv/bin/python name_keyframes.py runs/e01_front_20261107 --dry-run
 ```
 
-事件在 `runs/events.jsonl`，一行一条：
+`process_session.py` 加 `--post-url http://127.0.0.1:8000` 会把事件上报给后端（先启动 `smart_fridge_app/run_backend.command`）。
 
-```json
-{"time": "2026-11-04T20:15:03", "action": "in", "label": "banana", "label_zh": "香蕉", "confidence": 0.91, "track_id": 3, "keyframe": "runs/keyframes/20261104_201503_3_in_banana.jpg", "vlm": {"name": "香蕉", "category": "水果", "count": 3, "confidence": 0.95}}
-```
+## 数据布局（`runs/`，只在本机，永不进 git）
 
-## 上报库存后端（自动记账）
+| 目录 | 是什么 |
+| --- | --- |
+| `e01_front_20261107/` | 实验 E01：正面机位 16 个会话、`summary.md`、`人工可见性.md`；`_test_sessions/` 是调试时的测试会话 |
+| `eNN_短名_日期/` | 以后的实验，录制时用 `--out-dir` 指定 |
+| `sessions_selftest/`、`synthetic.mp4` | 合成视频自检 |
+| `_legacy_door_demo_1104-1106/` | 11-04～06 桌面 demo 的输出 |
 
-另开一个终端启动后端：
+每个实验的说明在 [docs/experiments/](../docs/experiments/)。
 
-```bash
-cd smart_fridge_app && ./start.sh
-```
+## 已知问题（v4 要改，代码改动走分支）
 
-然后给 demo 加 `--post-url`，每次过线都会把事件和关键帧发到 `/api/v1/door-events`，放入自动建批次、拿出自动扣减，
-手机打开 `http://<Mac IP>:8000` 能看到库存变化：
+- **横线方向不支持**：相机装在门洞上方时，门洞截面在画面里是横线。`record_sessions.py` 在 `--axis y` 时重心算成了 x 坐标；`process_session.py` 只算左右方向的光流。临时办法：相机转 90° 装。
+- **亮度触发在 Mac 上不可用**：自动曝光 1–7 秒内把亮度拉回（E01）。现在用手动 `o`；v4 倾向门磁。
+- **"时长"含填真值的时间**：`session.json` 的结束时间取在问完真值之后，`summary.md` 的时长偏大；准确时长 = 帧数 ÷ 帧率。
+- `session.json` 里的 YOLO 检测只存前 400 条。
+- **待写**：`import_clip.py`（把手机录像导入成会话，用于 E02 试机位）、门磁触发、环形缓冲、无窗口运行、关门后自动分析。
 
-```bash
-.venv/bin/python door_demo.py --trigger manual --model yolo11n.pt --post-url http://127.0.0.1:8000
-```
+## 对照组（保留，不再开发）
 
-后端不在线时只打印"上报失败"，本地 `events.jsonl` 照常记录。撤销一条：`POST /api/v1/door-events/{id}/undo`；
-改名字或数量：`PATCH /api/v1/door-events/{id}`，请求体 `{"label_zh": "鲜奶", "count": 2}`。
-
-## 不用摄像头的自检
+`door_demo.py`（YOLO + ByteTrack 实时过线，11-04 PLAN v2 的方案）及其启动脚本 `run_demo.command`、`run_fridge.command`、`run_acceptance.command`，
+加上合成视频生成 `make_synthetic_video.py`。E00 的桌面验收用的就是它。不用摄像头的自检：
 
 ```bash
 .venv/bin/python make_synthetic_video.py runs/synthetic.mp4 && .venv/bin/python door_demo.py --source runs/synthetic.mp4 --trigger auto --headless --out runs/synthetic_events.jsonl
 ```
 
-应该打印一次"开门"、一条"放入 香蕉"、一条"拿出 香蕉"、一次"关门"。
+模型：`models/food_best.onnx`（80 类食物，正本）、`yolo11n.pt`（COCO，首次运行自动下载，不进 git）。
 
-## 文件
-
-| 文件 | 作用 |
-| --- | --- |
-| `door_demo.py` | 主脚本：开门检测、YOLO + ByteTrack 追踪、过线计数、关键帧、事件输出 |
-| `vlm.py` | 可选的大模型命名，OpenAI 兼容接口 |
-| `labels_zh.json` | 类别英文 → 中文（80 类食物模型 + COCO 里的食物/容器） |
-| `make_synthetic_video.py` | 生成自检视频 |
-
-## 搬到 N100 迷你主机（第三步）
-
-N100 装 Ubuntu 24.04 后和 Mac 完全一样：
+## 安装（Mac）
 
 ```bash
-sudo apt install -y python3-venv && cd fridge_vision && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+cd ~/Projects/bx-project/fridge_vision && python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```
-
-帧率不足 10 fps 时把分辨率降到 320：
-
-```bash
-.venv/bin/python door_demo.py --source 1 --imgsz 320 --headless
-```
-
-再快一点可以把模型导成 OpenVINO 格式（`yolo export model=yolo11n.pt format=openvino`）后传给 `--model`。

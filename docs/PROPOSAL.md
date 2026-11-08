@@ -1,5 +1,9 @@
 # 家用纯视觉冰箱记账系统 · 项目计划书
 
+> **11-08 更新**：你和老师定下 v4（相机改装到门洞上方、库存初始化 + 进出事件、主机 OrangePi 4 Pro），见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+> 本文的 §2（对申请意味着什么）、§4（评测方法）、§6（新构思）仍然有效；§3 系统设计、§7 硬件、§9 日程已被 v4 和 [SCHEDULE.md](SCHEDULE.md) 取代；
+> §13 的待决项已在 [DECISIONS.md](DECISIONS.md) 11-08 拍板。在线版没有同步这次更新。
+
 版本 3.0　|　2026-11-07 晚（申请导向改版：先测量后设计，11-22 可交付）　|　仓库 `~/Projects/bx-project`
 在线可分享版本：https://claude.ai/artifact/5FRAXpgANS4yXgAqxmwiwy　|　上一版 2.2 见 git 历史（`git show ce2de55:docs/PROPOSAL.md`）
 

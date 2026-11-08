@@ -1,103 +1,102 @@
-# BX Project · 饮食均衡助手 / 食光冰箱
+# BX Project · 冰箱门口自动记账
 
-> **2026-11-04 方向变更**：改为纯视觉家用方案——门口摄像头 + N100 迷你主机本地 YOLO，开门触发追踪过线自动记账，
-> 不拍照、不扫码、不拍小票、不上云。项目计划书见 [docs/PROPOSAL.md](docs/PROPOSAL.md)，执行计划见 [PLAN.md](PLAN.md)，所需资料见 [docs/RESOURCES.md](docs/RESOURCES.md)，
-> 哪些旧资料还要用见 [docs/INVENTORY.md](docs/INVENTORY.md)，11-06 的全面复盘与建议见 [docs/REVIEW.md](docs/REVIEW.md)，11-07 独立代理的盲审见 [docs/BLIND_REVIEW.md](docs/BLIND_REVIEW.md)；下面的子项目说明仍描述现状。
+冰箱开门时，门洞上方的相机拍下手往里放、往外拿的东西；关门后自动判断"放入 / 拿出 · 什么 · 几件"，更新家里的库存。
+不扫码、不拍小票、不用手动记，并且**能用数字说明自己有多准**。
 
-一个"拍照识别 → 人工确认 → 入库 → 营养与食谱"的本地优先食品库存系统，目标设备是 Orange Pi 4 Pro +
-USB 摄像头 + 手持扫码枪，手机或触摸屏通过浏览器使用。
+这是一个申请导向的中学生项目：要有真实的问题、真实的测量、经得起追问的数据；把难点做好，不做全。可交付版本 11-22，打磨到 11-29。
 
-本仓库是整理后的唯一工作区（`~/Projects/bx-project`）。iCloud 和 `~/Downloads` 里的原始副本保持原样，
-不要再在 iCloud 目录里开发：iCloud 会同步 `.venv`、丢文件（这次就丢了两个 `index.html` 和模型权重）。
+## 现在到哪了（2026-11-08）
 
-## 子项目一览
+- **11-07** 第一次在真冰箱上测量（[实验 E01](docs/experiments/E01_front_20261107.md)，16 次真实开门 + 真值）：
+  正面机位时人会挡住冰箱，亮度触发不可靠，YOLO 只认出 2/27。
+- **11-08** 和老师定下 **v4**：相机改装到门洞上方，只拍手和手里的东西；库存由用户初始化，之后靠进出事件增减；主机用 OrangePi 4 Pro。
+  见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+- **下一步**：用手机试机位（E02）、让代码支持横线方向、识别手里拿的是什么。细节见 [docs/HANDOFF.md](docs/HANDOFF.md)。
 
-| 目录 | 是什么 | 状态（2026-11-04） |
+## 系统怎么拼起来
+
+```text
+门磁 / 画面触发 + 门洞上方相机
+        │ 开门：录像落盘
+        ▼
+fridge_vision/      关门后离线分析：切动作 → 判方向 → 手里有什么（大模型）→ 事件
+        │ HTTP
+        ▼
+smart_fridge_app/   库存后端（FastAPI + SQLite）：初始化、事件、纠错、对账、保质期
+        │ 同一套网页
+        ▼
+手机浏览器 / 门边小屏（可选）
+```
+
+开发在 Mac 上，运行在 OrangePi 4 Pro 上，两边是同一套代码。
+
+## 目录地图
+
+| 目录 | 是什么 | 状态 |
 | --- | --- | --- |
-| [`archive/smart_fridge_demo/`](archive/smart_fridge_demo/) | 功能最全的单体 Web 应用 v0.4.0：食物照片 YOLO、条码、小票 OCR、包装日期 OCR、库存、营养看板、DeepSeek 食谱、PWA。手机上传图片即可，不依赖设备摄像头。 | 可运行；已加 Docker，是**云端部署主线** |
-| [`smart_fridge_app/`](smart_fridge_app/) | 重写的"本地优先主软件"：持久化拍照会话、应用自有图库、库存流水、真实摄入统计、备份包。识别能力尚未接入，依赖 `camera_system` 提供摄像头。 | 23 个单元测试全部通过；是**设备端主线** |
-| [`archive/camera_system/`](archive/camera_system/) | Orange Pi 上的摄像头守护进程：USB 摄像头独占、GPIO 实体按钮、MJPEG 预览、本地 OCR 归档，HTTP API 供主软件调用。 | 6 个测试通过；只能在 Linux 设备上完整运行 |
-| [`archive/hardware/`](archive/hardware/) | 手持扫码枪外壳 V1–V3：OpenSCAD 源文件、CadQuery/Fusion 360 STEP、可打印 STL/3MF。V3 是当前版本，见 [交接文档](archive/hardware/scanner-gun-v3/PROJECT_HANDOFF.md)。 | 建模完成，未打印验证 |
-| [`archive/yolov11训练-onnx/`](archive/yolov11训练-onnx/) | YOLO11 食物检测模型的类别表（80 类）和测试结果图；权重统一放在 `fridge_vision/models/food_best.onnx`（此处是符号链接）。 | 模型可用，80 类已有中文名映射；缺真实照片验收集 |
-| [`archive/reference/`](archive/reference/) | Orange Pi 4 Pro 用户手册、研究素材 PPT、历史截图。 | 参考资料 |
+| [`fridge_vision/`](fridge_vision/) | 门口视觉：录制工具、离线分析（方向、认名）、评测脚本。`runs/` 是本机数据 | **主线** |
+| [`smart_fridge_app/`](smart_fridge_app/) | 库存后端和网页（手机 / 小屏）：批次、门事件、拍照录入、备份；34 个测试 | **主线** |
+| [`docs/`](docs/) | 架构、日程、决策、实验记录、日志、报告。[目录](docs/README.md) | **主线** |
+| [`hardware/`](hardware/) | 相机支架、门磁、主机外壳 | 预留（v4 新增） |
+| [`deploy/`](deploy/) | OrangePi 装机和开机自启 | 预留（v4 新增） |
+| [`archive/`](archive/) | 旧项目：拍照 / 扫码 demo、OrangePi 相机服务、扫码枪外壳、OrangePi 手册 | 归档；相机服务的 GPIO 代码和手册 v4 还会用到 |
 
-两个 Web 应用的关系：`smart_fridge_demo` 是老师 demo 基础上做出来的完整功能版；`smart_fridge_app` 是按
-[调研与决策文档](smart_fridge_app/docs/RESEARCH_AND_DECISIONS.md) 重做的更稳的底座。短期内两者并行：
-demo 负责云端演示和识别能力，app 负责设备端；合流计划见 [PLAN.md](PLAN.md)。
+## 快速开始（Mac）
 
-## 快速开始（本机 macOS）
+虚拟环境已经建好（Python 3.11）。录制要在 macOS 自带的"终端" App 里运行（Claude 里的终端没有相机权限），外接相机编号是 0。
 
-两个应用各自的虚拟环境已经建好（Python 3.11）。
-
-启动 demo（打开 http://127.0.0.1:8000 ）：
+录制一次实验（新实验用自己的文件夹，开门前、关门后各按一次 `o`）：
 
 ```bash
-cd archive/smart_fridge_demo && SMART_FRIDGE_GPIO_BUTTON_ENABLED=false .venv/bin/python -m uvicorn app.main:app --port 8000
+SOURCE=0 ~/Projects/bx-project/fridge_vision/run_record.command --trigger manual --out-dir runs/e03_overhead_20261114
 ```
 
-启动主软件（无摄像头时首页会提示相机离线，库存等功能可用）：
+统计、离线链路试跑（把文件夹换成要分析的实验）：
 
 ```bash
-cd smart_fridge_app && ./start.sh
-```
-
-跑测试：
-
-```bash
-cd smart_fridge_app && PYTHONPATH=. .venv/bin/python -m unittest discover -s tests -v
+cd ~/Projects/bx-project/fridge_vision && .venv/bin/python analyze_sessions.py runs/e01_front_20261107 --contact
 ```
 
 ```bash
-cd archive/camera_system && PYTHONPATH=. ../smart_fridge_app/.venv/bin/python -m unittest discover -s tests -v
+cd ~/Projects/bx-project/fridge_vision && .venv/bin/python process_session.py runs/e01_front_20261107 --dry-run --line 0.55 --band 0.50
 ```
 
-如果虚拟环境丢了，重建：
+启动后端（手机在同一个 Wi-Fi 下打开 `http://<Mac 的 IP>:8000`）、跑测试：
 
 ```bash
-cd archive/smart_fridge_demo && python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt httpx2
-```
-
-```bash
-cd smart_fridge_app && python3.11 -m venv .venv && .venv/bin/pip install -r requirements.lock.txt -r requirements-dev.txt
-```
-
-## 部署到云
-
-见 [DEPLOY.md](DEPLOY.md)。一句话版本：任意一台装了 Docker 的 Linux 云主机上
-
-```bash
-DEEPSEEK_API_KEY=sk-xxx docker compose -f archive/smart_fridge_demo/docker-compose.yml up -d --build
-```
-
-## 密钥与数据边界
-
-- `archive/smart_fridge_demo/config/api_settings.json` 里有一把真实的 DeepSeek 密钥，已被 `.gitignore` 排除。它曾随压缩包
-  在多台机器间流转，**建议去 DeepSeek 控制台轮换一次**，新密钥只通过环境变量 `DEEPSEEK_API_KEY` 注入。
-- 数据库、上传图、运行目录、备份都不入库（见 [`.gitignore`](.gitignore)）。
-- 两个应用都没有登录鉴权，只适合可信局域网。公网部署前必须加访问口令，DEPLOY.md 给了最省事的做法。
-
-## 协作（GitHub）
-
-本仓库在 GitHub 上是**私有**的（家里的录像和截图不公开）。老师和同学作为协作者加入。
-
-- `main` 随时可运行。改代码走分支 + Pull Request，哪怕只有自己一个人改，也留下记录；改文档可以直接提交到 `main`。
-- 提交前 `git pull`，提交信息写清楚改了什么、为什么。
-- `fridge_vision/runs/`（录像、关键帧、事件）永远不进仓库，已在 `.gitignore`。报告要用的失败案例图，挑好、确认没有人脸后放进 `docs/report/figures/`。
-- 任务用 GitHub Issues 记，一件事一个 issue。
-- 每台机器自己建虚拟环境（见上面"快速开始"），`.venv` 不进仓库。
-
-首次推送（GitHub CLI 已装在 ~/.local/bin，新开的终端里直接用 gh 也行）：
-
-```bash
-~/.local/bin/gh auth login --web
+open ~/Projects/bx-project/smart_fridge_app/run_backend.command
 ```
 
 ```bash
-~/.local/bin/gh repo create fridge-vision --private --source=. --remote=origin --push
+cd ~/Projects/bx-project/smart_fridge_app && PYTHONPATH=. .venv/bin/python -m unittest discover -s tests -v
 ```
 
-## 仓库约定
+虚拟环境丢了就重建：
 
-- 一个 git 仓库管全部子项目，`main` 分支；提交前确认 `git status` 没有 `.env`、`api_settings.json`、`*.db`。
-- 模型权重只跟踪当前使用的 `fridge_vision/models/food_best.onnx`（10.7 MB），其余 `.onnx` 不入库。
-- 3D 打印导出件（STL/3MF/STEP，共约 25 MB）入库，方便直接下载切片。
+```bash
+cd ~/Projects/bx-project/fridge_vision && python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt
+```
+
+```bash
+cd ~/Projects/bx-project/smart_fridge_app && python3.11 -m venv .venv && .venv/bin/pip install -r requirements.lock.txt -r requirements-dev.txt
+```
+
+## 规矩
+
+- **永不进 git**：`fridge_vision/runs/`（家里的录像）、`.env`、任何密钥、数据库。`.gitignore` 已覆盖；提交前看一眼 `git status`。
+- **GitHub**：私有仓库 [tct33x7/fridge-vision](https://github.com/tct33x7/fridge-vision)，老师和同学加为协作者。
+  改代码走分支 + Pull Request；改文档可以直接提交到 `main`；提交前先 `git pull`；提交信息写清改了什么、为什么。
+- **密钥**：`archive/smart_fridge_demo/config/api_settings.json` 里有一把真实的 DeepSeek 密钥（不在 git 里），它曾随压缩包流转，建议去控制台轮换。
+  大模型密钥只通过环境变量传入（`VLM_API_KEY`）。
+- **隐私**：只在家里局域网用，不把端口开到公网；报告和展示只用没有人脸的帧。
+
+## 谁做了什么（请你核对，有不对的直接改）
+
+| 谁 | 做了什么 | 依据 |
+| --- | --- | --- |
+| 你 | 提出问题和方向；每一次转向的决定；架设相机，录 E01 的 16 次真实开门并记真值；发现过线带没盖住门格、录制时画面卡住等问题；和老师讨论定下 v4；日志和报告 | 日志、[DECISIONS](docs/DECISIONS.md) 的"谁提出"一列、实验数据 |
+| 老师 | 11-08 架构讨论（机位、主机、界面）；硬件和大模型密钥 | DECISIONS |
+| Claude（Anthropic 的 AI，经 Claude Code） | 11-04 起这个仓库所有提交里的代码和文档文字（每个提交都带 `Co-Authored-By: Claude`），以及分析和建议 | `git log` |
+| 11-04 之前的材料 | 2026 年 8 月的旧项目，11-04 第一次提交时整体导入：`smart_fridge_demo`（基于老师的 demo）、`smart_fridge_app`、`camera_system`、扫码枪外壳（其交接文档显示是在 OpenAI Codex 环境里生成的）。作者请你补充 | `archive/`，git 记录不到 11-04 以前 |
+
+面试时你要能讲清每个模块在做什么、每个数字怎么来的。报告第 8 节"协作说明"由你自己写（见 [docs/report/](docs/report/)）。
