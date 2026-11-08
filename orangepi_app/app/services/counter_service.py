@@ -38,7 +38,26 @@ LINE_FILE = STORAGE_DIR / "counter_line.json"
 TRAIL_LEN = 40          # 轨迹保留点数
 HYSTERESIS = 6.0         # 距线小于该像素数视为“在线上”，防止抖动重复计数
 TRACK_TIMEOUT = 60       # 连续 N 帧未见则删除轨迹
-EXCLUDE_CLASSES = {"person"}  # 递送物品的手/人不参与计数
+STATIC_FRAMES = 45       # 持续存在超过该帧数（约3秒）且几乎未移动 -> 判定“静止物品”
+STATIC_RADIUS = 30.0     # 质心距首帧位置小于该像素数视为未移动
+
+# 不参与计数的品类：人（递送的手）+ 永远不会放进冰箱的东西
+# （动物/车辆/户外设施/家具家电/电子产品/运动器械/随身物品）
+EXCLUDE_CLASSES = {
+    "person",
+    "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
+    "traffic light", "fire hydrant", "stop sign", "parking meter", "bench",
+    "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear",
+    "zebra", "giraffe",
+    "backpack", "umbrella", "handbag", "tie", "suitcase",
+    "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat",
+    "baseball glove", "skateboard", "surfboard", "tennis racket",
+    "chair", "couch", "potted plant", "bed", "dining table", "toilet",
+    "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
+    "microwave", "oven", "toaster", "sink", "refrigerator",
+    "book", "clock", "scissors", "hair drier", "toothbrush",
+}
+# 可计数 = 食物/饮品/餐具 + vase/teddy bear（交给静止筛选兜底）
 
 # 默认计数线：画面中央垂直线（上→下），A→B 左侧为 +1 侧
 DEFAULT_LINE = (0.5, 0.15, 0.5, 0.85)
@@ -402,10 +421,23 @@ class CounterService:
             t = tracks.get(tid)
             if t is None:
                 t = {"cls": cls_name, "trail": deque(maxlen=TRAIL_LEN),
-                     "side": 0, "last_seen": frame_no, "line_epoch": -1}
+                     "side": 0, "last_seen": frame_no, "line_epoch": -1,
+                     "first_frame": frame_no, "first_c": (cx, cy),
+                     "max_r": 0.0, "static": False}
                 tracks[tid] = t
             t["last_seen"] = frame_no
             t["trail"].append((cx, cy))
+
+            # ---- 静止物品筛选: 长期存在且几乎未移动 -> 不显示不计数 ----
+            fx, fy = t["first_c"]
+            r = math.hypot(cx - fx, cy - fy)
+            t["max_r"] = max(t["max_r"], r)
+            if t["max_r"] >= STATIC_RADIUS:
+                t["static"] = False   # 位移超出静止半径 -> 恢复显示与计数
+            elif not t["static"] and (frame_no - t["first_frame"]) >= STATIC_FRAMES:
+                t["static"] = True    # 存在够久且从未离开 -> 判定静止
+            if t["static"]:
+                continue
 
             # ---- 方向计数 ----
             if gate is not None:
@@ -432,7 +464,7 @@ class CounterService:
             color = PALETTE[tid % len(PALETTE)]
             ix1, iy1, ix2, iy2 = int(x1), int(y1), int(x2), int(y2)
             cv2.rectangle(frame, (ix1, iy1), (ix2, iy2), color, 2)
-            label = f"{zh_name(t['cls'])} #{tid}"
+            label = f"{t['cls']} #{tid}"   # cv2 无法渲染中文, 画面标签用英文
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
             ty = max(iy1, th + 6)
             cv2.rectangle(frame, (ix1, ty - th - 6), (ix1 + tw + 4, ty), color, -1)
