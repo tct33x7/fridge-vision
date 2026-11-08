@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 from collections import defaultdict, deque
+from dataclasses import replace
 from typing import Any, Iterator
 
 import numpy as np
@@ -22,10 +23,21 @@ from app.config import (
     COUNTER_IMGSZ,
     COUNTER_MODEL,
     COUNTER_NPU_MODEL,
+    COUNTER_PRESET,
+    DOOR_MAX_ACTIVE_SECONDS,
+    DOOR_ROI,
+    DOOR_SLEEP_RATIO,
+    DOOR_SLEEP_SECONDS,
+    DOOR_STANDBY_ENABLED,
+    DOOR_WAKE_BRIGHTNESS,
+    DOOR_WAKE_HITS,
+    DOOR_WAKE_RATIO,
     STORAGE_DIR,
 )
 from app.database.connection import database
 from app.database.repositories import counter_repository
+from app.services.door_watcher import DoorConfig, DoorWatcher, parse_roi
+from app.services.line_counter import PRESETS, LineCounter, make_gate
 
 try:
     import cv2
@@ -36,13 +48,11 @@ except ImportError:  # 开发机上无摄像头依赖时保持可导入
 LINE_FILE = STORAGE_DIR / "counter_line.json"
 
 TRAIL_LEN = 40          # 轨迹保留点数
-HYSTERESIS = 6.0         # 距线小于该像素数视为“在线上”，防止抖动重复计数
-TRACK_TIMEOUT = 60       # 连续 N 帧未见则删除轨迹
-STATIC_FRAMES = 45       # 持续存在超过该帧数（约3秒）且几乎未移动 -> 判定“静止物品”
-STATIC_RADIUS = 30.0     # 质心距首帧位置小于该像素数视为未移动
-
+# 静止物品：存在超过这么多帧（约 3 秒）、离第一次出现的位置始终不到这么多像素 -> 不显示（台面上一直摆着的瓶子等）
+STATIC_FRAMES = 45
+STATIC_RADIUS = 30.0
 # 不参与计数的品类：人（递送的手）+ 永远不会放进冰箱的东西
-# （动物/车辆/户外设施/家具家电/电子产品/运动器械/随身物品）
+# （动物/车辆/户外设施/家具家电/电子产品/运动器械/随身物品）（老师 11-08 17:19 定的名单）
 EXCLUDE_CLASSES = {
     "person",
     "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
@@ -58,6 +68,19 @@ EXCLUDE_CLASSES = {
     "book", "clock", "scissors", "hair drier", "toothbrush",
 }
 # 可计数 = 食物/饮品/餐具 + vase/teddy bear（交给静止筛选兜底）
+READ_FAIL_REOPEN = 10   # 连续这么多次读不到画面（约 3 秒）就关掉摄像头重新打开（拔插后会这样）
+STANDBY_FRAME_INTERVAL = 0.5  # 待机时网页画面每隔多少秒更新一次
+
+# line_counter 的参数按"帧"写，是在 30 帧/秒的录像上定的；板子摄像头帧率不同时按比例换算成同样的秒数
+_FRAME_FIELDS = ("relink_frames", "track_timeout", "cooldown_frames", "confirm_frames", "birth_frames")
+
+
+def counter_config(preset: str, fps: float):
+    cfg = PRESETS.get(preset) or PRESETS["default"]
+    k = max(float(fps), 1.0) / 30.0
+    return replace(cfg, **{
+        f: (max(1, round(getattr(cfg, f) * k)) if getattr(cfg, f) > 0 else 0) for f in _FRAME_FIELDS
+    })
 
 # 默认计数线：画面中央垂直线（上→下），A→B 左侧为 +1 侧
 DEFAULT_LINE = (0.5, 0.15, 0.5, 0.85)
@@ -112,13 +135,22 @@ def draw_dashed(img, p1, p2, color, thickness=2, dash=18, gap=12):
 
 
 class CounterService:
-    """物品进出自动计数服务：独占摄像头运行 YOLO + ByteTrack 方向线计数。
+    """物品进出自动计数服务：独占摄像头，开门时识别 + 过线计数，平时待机。
 
     与 CameraService 共用同一颗 USB 摄像头，二者互斥运行：
     本服务运行时 CameraService 必须处于停止状态，反之亦然。
+
+    识别引擎由 _init_engine 选（NPU yolov5 优先，CPU ultralytics 兜底），统一成 detect(frame)。
+    每读到一帧：
+      DoorWatcher 判断待机 / 工作（app/services/door_watcher.py）；
+      待机：不跑识别，网页画面每 0.5 秒更新一次；
+      唤醒：开始一次"开门会话"，新建过线计数器；
+      工作：detect → LineCounter（app/services/line_counter.py，第 2 步的规则）→ 计数事件写库；
+      休眠：把还在等确认的过线按最后所在一边确认，记下这次会话。
+    摄像头连续读不到画面（拔插）时自动重新打开。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, load_history: bool = True, persist: bool = True) -> None:
         self.device = CAMERA_DEVICE
         self.width = CAMERA_WIDTH
         self.height = CAMERA_HEIGHT
@@ -127,6 +159,7 @@ class CounterService:
         self.enabled = COUNTER_ENABLED
         self.model_path = COUNTER_MODEL
         self.imgsz = COUNTER_IMGSZ
+        self.persist = persist
         self._condition = threading.Condition()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -145,7 +178,28 @@ class CounterService:
         self.inference_fps = 0.0
         self.n_tracks = 0
         self.error: str | None = None
-        self._load_initial_counts()
+        # 过线计数规则与开门检测
+        self.preset = COUNTER_PRESET if COUNTER_PRESET in PRESETS else "default"
+        self.counter_cfg = counter_config(self.preset, self.fps)
+        self.counter: LineCounter | None = None
+        self.frame_no = 0
+        self.door = DoorWatcher(DoorConfig(
+            enabled=DOOR_STANDBY_ENABLED,
+            wake_ratio=DOOR_WAKE_RATIO,
+            wake_brightness=DOOR_WAKE_BRIGHTNESS,
+            wake_hits=DOOR_WAKE_HITS,
+            sleep_ratio=DOOR_SLEEP_RATIO,
+            sleep_seconds=DOOR_SLEEP_SECONDS,
+            max_active_seconds=DOOR_MAX_ACTIVE_SECONDS,
+            roi=parse_roi(DOOR_ROI),
+        ))
+        self.session_seq = 0
+        self.session: dict[str, Any] | None = None
+        self.sessions: deque[dict[str, Any]] = deque(maxlen=20)
+        self._fps_t = 0.0
+        self._last_standby_frame = -1e9
+        if load_history:
+            self._load_initial_counts()
 
     # ---------------- 生命周期 ----------------
 
@@ -233,6 +287,8 @@ class CounterService:
             self.error = f"加载历史计数失败：{exc}"
 
     def _persist_event(self, cls: str, delta: int) -> None:
+        if not self.persist:
+            return
         try:
             with database() as connection:
                 counter_repository.record_event(connection, cls, delta)
@@ -262,8 +318,8 @@ class CounterService:
                         [(x1, y1, x2, y2, conf, cid) for x1, y1, x2, y2, conf, cid, _ in dets]
                     )
                     return [
-                        (tid, COCO_CLASSES[cls_id], x1, y1, x2, y2)
-                        for tid, cls_id, x1, y1, x2, y2, _ in trk
+                        (tid, COCO_CLASSES[cls_id], x1, y1, x2, y2, conf)
+                        for tid, cls_id, x1, y1, x2, y2, conf in trk
                     ]
 
                 return detect_npu
@@ -306,9 +362,10 @@ class CounterService:
             boxes = r.boxes.xyxy.cpu().numpy()
             ids = r.boxes.id.int().cpu().numpy()
             clss = r.boxes.cls.int().cpu().numpy()
+            confs = r.boxes.conf.cpu().numpy()
             return [
-                (int(tid), model.names[int(cid)], *[float(v) for v in box])
-                for box, tid, cid in zip(boxes, ids, clss)
+                (int(tid), model.names[int(cid)], *[float(v) for v in box], float(cf))
+                for box, tid, cid, cf in zip(boxes, ids, clss, confs)
             ]
 
         return detect_cpu
@@ -318,162 +375,189 @@ class CounterService:
         if detect is None:
             return
 
-        tracks: dict[int, dict[str, Any]] = {}
-        frame_no = 0
-        fps_t = time.time()
-
         while not self._stop_event.is_set():
             capture = self._open_capture()
             if capture is None:
                 self._stop_event.wait(3)
                 continue
-            self._set_status(
-                f"摄像头 {self.device} 计数运行中（{self.engine_name}）"
-            )
             with self._condition:
                 self.frame_w = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)) or self.width
                 self.frame_h = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)) or self.height
+            self.door.reset(time.monotonic())
+            if not self.door.cfg.enabled:
+                self._begin_session(time.monotonic(), reason="待机已关闭，一直识别")
+            self._set_status(f"摄像头 {self.device} 已打开（{self.engine_name}），等待画面稳定")
 
+            fails = 0
             while not self._stop_event.is_set():
                 ret, frame = capture.read()
                 if not ret or frame is None:
+                    fails += 1
+                    if fails >= READ_FAIL_REOPEN:
+                        self._set_status("摄像头读不到画面，正在重新连接（可能被拔插过）", error=True)
+                        break
                     self._stop_event.wait(0.3)
                     continue
-                frame_no += 1
-                now_str = time.strftime("%H:%M:%S")
+                fails = 0
+                out = self.process_frame(detect, frame, time.monotonic())
+                if out is not None:
+                    self._publish(out)
 
-                try:
-                    frame_tracks = detect(frame)
-                except Exception as exc:
-                    self._set_status(f"推理失败：{exc}", error=True)
-                    self._stop_event.wait(1)
-                    continue
-
-                with self._line_lock:
-                    line_norm = self.line
-                    line_epoch = self.line_epoch
-
-                gate = None
-                if line_norm is not None:
-                    H, W = frame.shape[:2]
-                    ax, ay = line_norm[0] * W, line_norm[1] * H
-                    bx, by = line_norm[2] * W, line_norm[3] * H
-                    dx, dy = bx - ax, by - ay
-                    L = math.hypot(dx, dy)
-                    if L > 10:
-                        ux, uy = dx / L, dy / L
-                        nx, ny = -uy, ux  # 左法线 = +1 侧
-                        gate = (ax, ay, bx, by, ux, uy, nx, ny)
-
-                self.n_tracks = self._ingest_tracks(
-                    frame, frame_tracks, tracks, frame_no, now_str, gate, line_epoch
-                )
-
-                stale = [k for k, v in tracks.items() if frame_no - v["last_seen"] > TRACK_TIMEOUT]
-                for k in stale:
-                    del tracks[k]
-
-                # ---- 绘制计数线与正方向箭头 ----
-                if gate is not None:
-                    g_ax, g_ay, bx, by, ux, uy, nx, ny = gate
-                    far = 2000.0
-                    draw_dashed(frame, (g_ax - ux * far, g_ay - uy * far),
-                                (g_ax + ux * far, g_ay + uy * far), (0, 140, 255), 2)
-                    cv2.line(frame, (int(g_ax), int(g_ay)), (int(bx), int(by)), (0, 140, 255), 3)
-                    mx, my = (g_ax + bx) / 2, (g_ay + by) / 2
-                    tip = (int(mx + nx * 70), int(my + ny * 70))
-                    cv2.arrowedLine(frame, (int(mx), int(my)), tip, (0, 255, 255), 4,
-                                    tipLength=0.3, line_type=cv2.LINE_AA)
-                    cv2.putText(frame, "+1", (int(tip[0] + nx * 10), int(tip[1] + ny * 10)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255), 3, cv2.LINE_AA)
-                else:
-                    cv2.putText(frame, "counting line cleared",
-                                (12, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-
-                now = time.time()
-                inst = 1.0 / max(now - fps_t, 1e-6)
-                self.inference_fps = self.inference_fps * 0.9 + inst * 0.1 if self.inference_fps else inst
-                fps_t = now
-                cv2.putText(frame, f"FPS:{self.inference_fps:4.1f}  Tracks:{self.n_tracks}",
-                            (12, frame.shape[0] - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                            (255, 255, 255), 2)
-
-                ok, buf = cv2.imencode(
-                    ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality]
-                )
-                if ok:
-                    with self._condition:
-                        self.jpeg = buf.tobytes()
-                        self.seq += 1
-                        self._condition.notify_all()
-
+            self._end_session(time.monotonic(), reason="摄像头断开或计数暂停")
             self._release_capture()
+            if not self._stop_event.is_set():
+                self._stop_event.wait(2)
 
-    def _ingest_tracks(self, frame, frame_tracks, tracks, frame_no, now_str,
-                       gate, line_epoch):
-        """轨迹入库/计数/绘制, 返回本轮可见轨迹数"""
-        seen_ids = set()
-        for tid, cls_name, x1, y1, x2, y2 in frame_tracks:
+    def process_frame(self, detect, frame, now: float):
+        """处理一帧；返回要推给网页的画面（待机时大多返回 None，省掉 JPEG 编码）。"""
+        change = self.door.observe(frame, now)
+        if change == "wake":
+            self._begin_session(now, reason=self.door.wake_reason)
+        elif change == "sleep":
+            self._end_session(now, reason=self.door.sleep_reason)
+
+        if not self.door.active:
+            self.n_tracks = 0
+            self.inference_fps = 0.0
+            if now - self._last_standby_frame < STANDBY_FRAME_INTERVAL:
+                return None
+            self._last_standby_frame = now
+            self._set_status(f"待机（{self.engine_name}）：画面静止，有人开门、伸手时自动开始识别")
+            with self._line_lock:
+                gate = make_gate(self.line, frame.shape[1], frame.shape[0])
+            self._draw_line(frame, gate)
+            cv2.putText(frame, f"STANDBY  motion {self.door.motion:.1%}", (12, frame.shape[0] - 12),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2)
+            return frame
+        return self._process_active(detect, frame, now)
+
+    def _process_active(self, detect, frame, now: float):
+        if self.counter is None:   # 保险：工作状态一定有计数器
+            self._begin_session(now, reason="恢复识别")
+        try:
+            frame_tracks = detect(frame)
+        except Exception as exc:
+            self._set_status(f"推理失败：{exc}", error=True)
+            return frame
+        self.frame_no += 1
+        H, W = frame.shape[:2]
+        with self._line_lock:
+            gate = make_gate(self.line, W, H)
+            line_epoch = self.line_epoch
+
+        # 引擎输出 (编号, 类别, x1, y1, x2, y2[, 置信度]) → 计数器要的 (编号, 类别, 置信度, x1, y1, x2, y2)
+        dets = []
+        for tr in frame_tracks:
+            tid, cls_name, x1, y1, x2, y2 = tr[:6]
             if cls_name in EXCLUDE_CLASSES:
                 continue
-            seen_ids.add(tid)
-            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-            t = tracks.get(tid)
-            if t is None:
-                t = {"cls": cls_name, "trail": deque(maxlen=TRAIL_LEN),
-                     "side": 0, "last_seen": frame_no, "line_epoch": -1,
-                     "first_frame": frame_no, "first_c": (cx, cy),
-                     "max_r": 0.0, "static": False}
-                tracks[tid] = t
-            t["last_seen"] = frame_no
-            t["trail"].append((cx, cy))
+            conf = float(tr[6]) if len(tr) > 6 else 1.0
+            dets.append((int(tid), cls_name, conf, float(x1), float(y1), float(x2), float(y2)))
+        events, visible = self.counter.update(dets, self.frame_no, gate, line_epoch)
+        self._apply_events(events, self.counter.corrections)
+        # 静止物品不画、不算进目标数（它们没过线，本来也不会被计数；一旦被拿起移动就恢复显示）
+        shown = [d for d in dets
+                 if not (d[0] in visible and visible[d[0]].seen >= STATIC_FRAMES
+                         and visible[d[0]].travel < STATIC_RADIUS)]
+        self.n_tracks = len(shown)
 
-            # ---- 静止物品筛选: 长期存在且几乎未移动 -> 不显示不计数 ----
-            fx, fy = t["first_c"]
-            r = math.hypot(cx - fx, cy - fy)
-            t["max_r"] = max(t["max_r"], r)
-            if t["max_r"] >= STATIC_RADIUS:
-                t["static"] = False   # 位移超出静止半径 -> 恢复显示与计数
-            elif not t["static"] and (frame_no - t["first_frame"]) >= STATIC_FRAMES:
-                t["static"] = True    # 存在够久且从未离开 -> 判定静止
-            if t["static"]:
-                continue
+        self._draw_tracks(frame, shown, visible)
+        self._draw_line(frame, gate)
+        inst = 1.0 / max(now - self._fps_t, 1e-6)
+        self.inference_fps = self.inference_fps * 0.9 + inst * 0.1 if self.inference_fps else min(inst, 30.0)
+        self._fps_t = now
+        cv2.putText(frame, f"FPS:{self.inference_fps:4.1f}  Tracks:{self.n_tracks}  #{self.session_seq}",
+                    (12, frame.shape[0] - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        return frame
 
-            # ---- 方向计数 ----
-            if gate is not None:
-                g_ax, g_ay, _, _, _, _, nx, ny = gate
-                proj = (cx - g_ax) * nx + (cy - g_ay) * ny
-                side = 1 if proj > HYSTERESIS else (-1 if proj < -HYSTERESIS else 0)
-                if t["line_epoch"] != line_epoch:
-                    t["side"] = side if side != 0 else t["side"]
-                    t["line_epoch"] = line_epoch
-                elif side != 0 and side != t["side"] and t["side"] != 0:
-                    delta = 1 if side > t["side"] else -1
-                    cls = t["cls"]
-                    with self._condition:
-                        self.counts[cls] += delta
-                        self.events.append(
-                            {"t": now_str, "cls": cls, "delta": delta}
-                        )
-                    self._persist_event(cls, delta)
-                    t["side"] = side
-                elif side != 0:
-                    t["side"] = side
-
-            # ---- 绘制 ----
+    def _draw_tracks(self, frame, dets, visible) -> None:
+        for tid, cls_name, _, x1, y1, x2, y2 in dets:
+            t = visible.get(tid)
+            label_cls = self.counter.label(t) if t is not None else cls_name
             color = PALETTE[tid % len(PALETTE)]
             ix1, iy1, ix2, iy2 = int(x1), int(y1), int(x2), int(y2)
             cv2.rectangle(frame, (ix1, iy1), (ix2, iy2), color, 2)
-            label = f"{t['cls']} #{tid}"   # cv2 无法渲染中文, 画面标签用英文
+            label = f"{label_cls} #{tid}"   # OpenCV 写不了中文，画面上用英文类别名；网页上显示中文
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
             ty = max(iy1, th + 6)
             cv2.rectangle(frame, (ix1, ty - th - 6), (ix1 + tw + 4, ty), color, -1)
             cv2.putText(frame, label, (ix1 + 2, ty - 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
-            if len(t["trail"]) > 1:
-                pts = np.array(t["trail"], np.int32).reshape(-1, 1, 2)
+            if t is not None and len(t.trail) > 1:
+                pts = np.array(t.trail, np.int32).reshape(-1, 1, 2)
                 cv2.polylines(frame, [pts], False, (255, 220, 80), 2, cv2.LINE_AA)
-        return len(seen_ids)
+
+    def _draw_line(self, frame, gate) -> None:
+        if gate is None:
+            cv2.putText(frame, "counting line cleared",
+                        (12, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+            return
+        g_ax, g_ay, bx, by, ux, uy, nx, ny = gate
+        far = 2000.0
+        draw_dashed(frame, (g_ax - ux * far, g_ay - uy * far),
+                    (g_ax + ux * far, g_ay + uy * far), (0, 140, 255), 2)
+        cv2.line(frame, (int(g_ax), int(g_ay)), (int(bx), int(by)), (0, 140, 255), 3)
+        mx, my = (g_ax + bx) / 2, (g_ay + by) / 2
+        tip = (int(mx + nx * 70), int(my + ny * 70))
+        cv2.arrowedLine(frame, (int(mx), int(my)), tip, (0, 255, 255), 4,
+                        tipLength=0.3, line_type=cv2.LINE_AA)
+        cv2.putText(frame, "+1", (int(tip[0] + nx * 10), int(tip[1] + ny * 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255), 3, cv2.LINE_AA)
+
+    def _publish(self, frame) -> None:
+        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality])
+        if ok:
+            with self._condition:
+                self.jpeg = buf.tobytes()
+                self.seq += 1
+                self._condition.notify_all()
+
+    # ---------------- 开门会话 ----------------
+
+    def _begin_session(self, now: float, reason: str) -> None:
+        self.session_seq += 1
+        self.counter = LineCounter(self.counter_cfg, trail_len=TRAIL_LEN)  # 每次开门一个新计数器
+        self.frame_no = 0
+        self._fps_t = now
+        self.session = {"n": self.session_seq, "start": time.strftime("%H:%M:%S"),
+                        "t0": now, "wake": reason, "events": 0}
+        self._set_status(f"开门中：第 {self.session_seq} 次（{reason}，{self.engine_name}）")
+        print(f"[door] 唤醒 #{self.session_seq}：{reason}", flush=True)
+
+    def _end_session(self, now: float, reason: str) -> None:
+        if self.counter is not None:
+            self._apply_events(self.counter.finish(self.frame_no), [])  # 还在等确认的，按最后所在一边算
+            self.counter = None
+        if self.session is None:
+            return
+        sess, self.session = self.session, None
+        sess.update(end=time.strftime("%H:%M:%S"), seconds=round(now - sess.pop("t0"), 1),
+                    sleep=reason, frames=self.frame_no)
+        self.sessions.append(sess)
+        print(f"[door] 待机 #{sess['n']}：{reason}；用时 {sess['seconds']} 秒，"
+              f"识别 {sess['frames']} 帧，计数事件 {sess['events']} 个", flush=True)
+
+    def _apply_events(self, events, corrections) -> None:
+        if not events and not corrections:
+            return
+        now_str = time.strftime("%H:%M:%S")
+        with self._condition:
+            for e in events:
+                e["t"] = now_str   # 事件字典和计数器共用：事后改类别时，流水里也跟着改
+                self.counts[e["cls"]] += e["delta"]
+                self.events.append(e)
+            for e, old, new in corrections:   # 事后改类别：把计数从旧类别挪到新类别
+                self.counts[old] -= e["delta"]
+                self.counts[new] += e["delta"]
+                if self.counts[old] == 0:
+                    del self.counts[old]
+        if self.session is not None:
+            self.session["events"] += len(events)
+        for e in events:
+            self._persist_event(e["cls"], e["delta"])
+        for e, old, new in corrections:      # 数据库里补一对冲正记录，累计数保持正确
+            self._persist_event(old, -e["delta"])
+            self._persist_event(new, e["delta"])
 
     def _set_status(self, text: str, error: bool = False) -> None:
         self.status_text = text
@@ -511,6 +595,13 @@ class CounterService:
             "paused": paused or not self.running,
             "status": self.status_text,
             "engine": self.engine_name,
+            # 开门检测与待机
+            "standby_enabled": self.door.cfg.enabled,
+            **self.door.snapshot(time.monotonic()),
+            "session": self.session_seq if self.session is not None else None,
+            "sessions": list(self.sessions)[::-1][:10],
+            "preset": self.preset,
+            "model": self.engine_name,
             "error": self.error,
             "device": self.device,
             "fps": round(self.inference_fps, 1),
