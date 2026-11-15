@@ -73,39 +73,68 @@ def main():
     print(f"相机 {a.source}：{W}x{H}，要求 {a.fps} 帧/秒（相机自己报的：{cap.get(cv2.CAP_PROP_FPS):g}）。"
           f"空格开始/暂停，q 结束。")
 
-    vw = None               # 第一次开始录时才建：用预览时实测的帧率写文件头
+    vw = None               # 录到第 15 帧时才建：用实测帧率写文件头、用实际画面尺寸
     header_fps = None
+    size = None             # 录像的 (宽, 高)：按第一张录下的画面定
+    resized = 0             # 画面尺寸中途变了、被缩放成录像尺寸的帧数
+    pending = []            # 文件建好之前先存在内存里的帧
     rec = False
-    n = 0                   # 已写入的帧数
-    t_written = []          # 每个写入帧被读到的时刻（秒，相对第一个写入帧）
-    toggles = []            # [已写入帧数, 时刻, "rec"/"pause"]
+    n = 0                   # 已录的帧数（含还在内存里的）
+    t_written = []          # 每个录下的帧被读到的时刻（秒，相对第一帧）
+    toggles = []            # [已录帧数, 时刻, "rec"/"pause"]
     t_first = None
     preview_ts = deque(maxlen=60)   # 预览时最近的读帧时刻，用来估计帧率
     idx = 0                 # 读到第几帧
     t_start = time.monotonic()
     stop_reason = "按了 q"
 
-    def toggle(t):
-        nonlocal vw, header_fps, rec
+    def open_writer():
+        nonlocal vw, header_fps
+        header_fps = file_fps or measured_fps(t_written) or measured_fps(preview_ts) or float(a.fps)
+        header_fps = max(1.0, round(header_fps, 2))
+        vw = cv2.VideoWriter(a.out, cv2.VideoWriter_fourcc(*"mp4v"), header_fps, size)
+        if not vw.isOpened():
+            raise SystemExit(f"建不了录像文件 {a.out}")
+        for f in pending:
+            vw.write(f)
+        pending.clear()
+
+    def put(frame):
+        nonlocal size, resized
+        h, w = frame.shape[:2]
+        if size is None:
+            size = (w, h)
+            if size != (W, H):
+                print(f"！相机报的是 {W}x{H}，实际画面是 {w}x{h}，按实际的录")
+        elif (w, h) != size:
+            frame = cv2.resize(frame, size)
+            resized += 1
         if vw is None:
-            header_fps = file_fps or measured_fps(preview_ts) or float(a.fps)
-            header_fps = max(1.0, round(header_fps, 2))
-            vw = cv2.VideoWriter(a.out, cv2.VideoWriter_fourcc(*"mp4v"), header_fps, (W, H))
-            if not vw.isOpened():
-                raise SystemExit(f"建不了录像文件 {a.out}")
+            pending.append(frame)
+            if len(pending) >= 15:
+                open_writer()
+        else:
+            vw.write(frame)
+
+    def toggle(t):
+        nonlocal rec
         rec = not rec
         toggles.append([n, round(t - t_first, 4) if t_first is not None else 0.0, "rec" if rec else "pause"])
 
-    # Ctrl+C 只做个记号，等当前这一帧写完、记好时间再停，这样录像和时间戳的帧数一定对得上；
-    # 连按两次才立刻中断（录像照样会收尾保存）
-    stop = {"n": 0}
+    # Ctrl+C 只做个记号，等当前这一帧写完、记好时间再停，这样录像和时间戳的帧数一定对得上。
+    # 连按两次才立刻中断，但也要等正在写的那一帧写完；录像和时间戳照样会存好。
+    stop = {"n": 0, "busy": False, "late": False}
 
     def on_sigint(signum, frame_):
         stop["n"] += 1
         if stop["n"] >= 2:
-            raise KeyboardInterrupt
+            if stop["busy"]:
+                stop["late"] = True
+            else:
+                raise KeyboardInterrupt
 
     signal.signal(signal.SIGINT, on_sigint)
+    error = None
 
     try:
         while True:
@@ -119,14 +148,18 @@ def main():
             idx += 1
             # 相机用真实时钟；读录像文件时按文件帧率（测试时读文件比实时快得多）
             t = (idx - 1) / file_fps if from_file else time.monotonic()
-            if a.autostart and vw is None:
+            if a.autostart and not toggles:
                 toggle(t)
             if rec:
+                stop["busy"] = True
                 if t_first is None:
                     t_first = t
-                vw.write(frame)
+                put(frame)
                 n += 1
                 t_written.append(round(t - t_first, 4))
+                stop["busy"] = False
+                if stop["late"]:
+                    raise KeyboardInterrupt
             else:
                 preview_ts.append(t)
             if a.no_window:
@@ -144,16 +177,26 @@ def main():
                 break
     except KeyboardInterrupt:
         stop_reason = "按了 Ctrl+C"
+    except Exception as exc:          # 其他错误：先把录像和时间戳存好，最后再报出来
+        error = exc
+        stop_reason = f"出错了：{type(exc).__name__}: {exc}"
     finally:
-        # 不管怎么退出（q、Ctrl+C、出错），都先把录像收尾存好
-        if vw is not None:
-            vw.release()
-        cap.release()
-        if not a.no_window:
-            cv2.destroyAllWindows()
+        # 不管怎么退出（q、Ctrl+C、出错），都先把录像收尾存好；收尾时不再理会 Ctrl+C
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        try:
+            if n and vw is None:
+                open_writer()
+        finally:
+            if vw is not None:
+                vw.release()
+            cap.release()
+            if not a.no_window:
+                cv2.destroyAllWindows()
 
     if vw is None or n == 0:
         print(f"没有录到任何画面（{stop_reason}；是不是没按空格开始录？），没有保存。")
+        if error:
+            raise error
         return
 
     # 旁边的时间戳文件：写失败也不影响录像本身
@@ -168,14 +211,15 @@ def main():
                 "video": os.path.basename(a.out),
                 "source": str(a.source),
                 "recorded_at": datetime.now().isoformat(timespec="seconds"),
-                "size": [W, H],
+                "size": list(size),
                 "fps_requested": a.fps,
                 "fps_header": header_fps,
                 "fps_measured": round(real_fps, 2),
                 "frames": n,
+                "resized_frames": resized,
                 "toggles": toggles,
                 "t": t_written,
-                "note": "t = 每个写入帧被读到的时刻（秒，从第一帧算起）；暂停体现为一个大于 1 秒的间隔",
+                "note": "t = 每个录下的帧被读到的时刻（秒，从第一帧算起）；暂停体现为一个大于 1 秒的间隔",
             }, f, ensure_ascii=False, separators=(",", ":"))
         side_msg = f"时间戳在 {os.path.basename(side)}"
     except OSError as exc:
@@ -187,6 +231,10 @@ def main():
     if abs(real_fps - header_fps) / header_fps > 0.15:
         print(f"！注意：实测帧率和文件头差了 {abs(real_fps - header_fps) / header_fps:.0%}。"
               f"按文件头播放时间会不准；评测工具按 {os.path.basename(side)} 里的时间算。")
+    if resized:
+        print(f"！有 {resized} 帧画面尺寸和开头不一样，已缩放成 {size[0]}x{size[1]}")
+    if error:
+        raise error
 
 
 if __name__ == "__main__":
