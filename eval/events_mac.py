@@ -11,10 +11,15 @@ Mac 路线：YOLO11s + ultralytics ByteTrack（检测结果缓存，和 replay.p
 要点：
 - 时间按 eval/timebase.py：有 .frames.json 用真实时间，没有就按文件头（会提示）。
 - 计数规则里按"帧"写的参数是在 30 帧/秒上定的，这里和板子一样按真实帧率等比例换算
-  （relink_frames、track_timeout、cooldown_frames、confirm_frames、birth_frames）。
-- 每个动作窗口单独新建计数器，窗口结束时按"关门"收尾（finish）。所以这条路线**假设开门检测是完美的**：
-  动作之间不计数，不会有"窗口外的误计"。开门检测造成的误计要看板子路线（simulate_counter.py --events-json）。
-- 另外记下每个窗口里"有没有任何轨迹（任意类别）从线的一边走到另一边"，作为"② 检测器框到"的自动参考（只是代理）。
+  （relink_frames、track_timeout、cooldown_frames、confirm_frames、birth_frames）；
+  每个动作那一段用那一段自己的真实帧率（冰箱灯一亮帧率可能会变）。
+- 按动作分段，和打分时的事件归属完全一样：相邻两个动作之间按中点分，第一个动作从开始前 2 秒起，最后一个到录像结束。
+  每段新建一个计数器（相当于每次开门一个新计数器），段末按"关门"收尾（finish）。
+  所以这条路线**假设开门检测是完美的**：第一个动作之前不计数，也不会因为人走过而被唤醒。开门检测造成的误计要看板子路线
+  （simulate_counter.py --events-json）。
+- 事件时间 = 物品过线的那一帧的时间。
+- 另外记下每段里"有没有任何轨迹（任意类别）从线的一边走到另一边"，作为"② 检测器框到"的自动参考。只是代理：
+  只看有追踪编号的框，追踪编号在线上断了（正是遮挡的时候）就看不到，以人工勾选为准。
 """
 import argparse
 import ast
@@ -99,61 +104,75 @@ def main():
     ap.add_argument("--exclude", default="pc", choices=["pc", "board"],
                     help="pc = 只去掉 person（和 demo 一样）；board = 板子上的排除名单（61 类）")
     ap.add_argument("--windows", default="truth", choices=["truth", "whole"])
-    ap.add_argument("--fps", type=float, help="没有 .frames.json 时，用这个真实帧率算时间（比如秒表测的）")
+    ap.add_argument("--fps", type=float, help="没有 .frames.json 时，用这个真实帧率算时间（比如秒表测的）；有 .frames.json 时忽略")
     ap.add_argument("--conf", type=float, default=0.35)
     ap.add_argument("--imgsz", type=int, default=640)
-    ap.add_argument("--pre", type=float, default=0.5, help="窗口开始前多算几秒")
-    ap.add_argument("--post", type=float, default=1.0, help="窗口结束后多算几秒")
     ap.add_argument("--cache-dir", help="检测缓存放哪；默认和录像同一个文件夹")
     ap.add_argument("--out", help="事件文件；默认 <录像名>.mac-<preset>-<exclude>.events.json")
     a = ap.parse_args()
 
     import replay  # noqa: E402  （demos/yolo_web_counter/replay.py：检测 + 缓存）
-    from score_actions import resolve_windows  # noqa: E402
+    from score_actions import TruthError, boundaries, resolve_windows  # noqa: E402
 
     truth_path = a.truth or os.path.splitext(a.video)[0] + ".truth.json"
     truth = json.load(open(truth_path, encoding="utf-8")) if os.path.isfile(truth_path) else {}
     line = [float(v) for v in a.line.split(",")] if a.line else truth.get("line")
     if not line:
         sys.exit("需要计数线：--line ax,ay,bx,by，或在真值里写 \"line\"")
+    if a.line and truth.get("line") and any(abs(x - float(y)) > 1e-6 for x, y in zip(line, truth["line"])):
+        print(f"！--line {line} 和真值里的 {truth['line']} 不一样；打分时会因为线对不上而停下", file=sys.stderr)
+
+    actions = None
+    if a.windows == "truth":
+        if not truth.get("actions"):
+            sys.exit(f"真值 {truth_path} 里没有 actions；整段跑请加 --windows whole")
+        try:
+            actions, _, _ = resolve_windows(truth, truth_path)   # 时间重叠、窗口没用到等问题在这里就停下
+        except TruthError as exc:
+            sys.exit(f"停下了：{exc}")
 
     cache_dir = a.cache_dir or os.path.dirname(os.path.abspath(a.video))
     d = replay.detect(a.video, "off", a.conf, a.imgsz, cache_dir)
     tb = timebase.load(a.video, fps_override=a.fps, n_frames=d["frames"])
-    cfg = scaled_config(a.preset, tb.fps)
     excl = board_exclude_classes() if a.exclude == "board" else {"person"}
     frames = [[x for x in dets if x[1] not in excl] for dets in d["dets"]]
     raw_frames = d["dets"]   # 只去掉了 person 的（缓存里本来就没有 person）
     gate = make_gate(line, d["w"], d["h"])
     if gate is None:
         sys.exit(f"计数线太短：{line}")
+    N = len(frames)
 
+    # 每个动作一段：和打分时的事件归属完全一样（相邻动作之间按中点分，第一个动作从开始前 2 秒起），
+    # 每段新建一个计数器（相当于每次开门一个新计数器），段末按"关门"收尾。
     if a.windows == "whole":
-        wins = [{"n": 1, "start_s": tb.t[0], "end_s": tb.t[-1]}]
-        pre = post = 0.0
+        ranges = [(1, 0, N)]
     else:
-        if not truth.get("actions"):
-            sys.exit(f"真值 {truth_path} 里没有 actions；整段跑请加 --windows whole")
-        actions, _ = resolve_windows(truth, truth_path)
-        wins = sorted(({"n": x.get("n", i + 1), "start_s": x["start_s"], "end_s": x["end_s"]}
-                       for i, x in enumerate(actions)), key=lambda w: w["start_s"])
-        pre, post = a.pre, a.post
+        for x in actions:
+            if x["start_s"] > tb.t[-1] + 1.0:
+                sys.exit(f"动作 {x['n']} 从 {x['start_s']:.1f}s 开始，但录像只有 {tb.t[-1]:.1f} 秒：真值和录像对不上？")
+        b = boundaries(actions)
+        ranges = [(x["n"], tb.frame_at(b[i]), min(N, tb.frame_at(b[i + 1]) if b[i + 1] != float("inf") else N))
+                  for i, x in enumerate(actions)]
 
     events, win_info = [], []
-    N = len(frames)
-    for w in wins:
-        f0 = tb.frame_at(w["start_s"] - pre)
-        f1 = min(N, tb.frame_at(w["end_s"] + post) + 1)
+    for n, f0, f1 in ranges:
+        fps = tb.fps if a.windows == "whole" else tb.fps_between(f0, f1)
+        if abs(fps - tb.fps) / tb.fps > 0.15:
+            print(f"！动作 {n} 这一段实际 {fps:.1f} 帧/秒，和整段的 {tb.fps:.1f} 差得多（冰箱灯？）：这一段的计数参数按 {fps:.1f} 换算",
+                  file=sys.stderr)
+        cfg = scaled_config(a.preset, fps)
         lc = LineCounter(cfg)
         for i in range(f0, f1):
             ev, _ = lc.update([tuple(x) for x in frames[i]], i + 1, gate)
-            events.extend((w["n"], e) for e in ev)
-        events.extend((w["n"], e) for e in lc.finish(f1))
-        win_info.append({**w, "frames": [f0, f1],
+            events.extend((n, e) for e in ev)
+        events.extend((n, e) for e in lc.finish(f1))
+        win_info.append({"n": n, "start_s": round(tb.t[f0], 3) if f0 < N else None,
+                         "end_s": round(tb.t[f1 - 1], 3) if f1 > 0 else None, "frames": [f0, f1],
+                         "fps": round(fps, 3), "confirm_frames": cfg.confirm_frames,
                          "crossing_tracks_any_class": crossing_tracks(raw_frames[f0:f1], gate)})
 
-    out_events = [{"t": round(tb.t[min(e["frame"], N) - 1], 3), "delta": e["delta"], "cls": e["cls"],
-                   "tid": e["tid"], "frame": e["frame"], "window": wn} for wn, e in events]
+    out_events = [{"t": round(tb.t[min(max(e["frame"], 1), N) - 1], 3), "delta": e["delta"], "cls": e["cls"],
+                   "tid": e["tid"], "frame": e["frame"], "action": n} for n, e in events]
     for wi in win_info:
         for c in wi["crossing_tracks_any_class"]:
             c["excluded"] = c["cls"] in excl
@@ -168,10 +187,12 @@ def main():
             "detections_cache": f"{d['video']} light=off（replay.py 的缓存）",
             "tracker": "ultralytics bytetrack.yaml",
             "counter": f"demos/yolo_web_counter/counter.py @ {git_rev(DEMO)}",
-            "preset": a.preset, "config_scaled_to_fps": round(tb.fps, 3), "config": asdict(cfg),
+            "preset": a.preset, "config_at_clip_fps": asdict(scaled_config(a.preset, tb.fps)),
+            "config_note": "按帧写的参数按每一段的真实帧率换算，见 windows[].fps / confirm_frames",
             "exclude": f"{a.exclude}（{len(excl)} 类）",
-            "line": line, "windows": a.windows, "pre_s": pre, "post_s": post,
-            "assumes": "开门检测完美：只在动作窗口里计数" if a.windows == "truth" else "整段连续计数",
+            "line": line, "windows": a.windows,
+            "assumes": ("开门检测完美：第一个动作前 2 秒之前不计数；每个动作一个新计数器，相邻动作之间按中点分"
+                        if a.windows == "truth" else "整段连续计数"),
             "versions": versions(), "made_by": f"eval/events_mac.py @ {git_rev(HERE)}",
             "made_at": datetime.now().isoformat(timespec="seconds"),
         },
@@ -181,7 +202,7 @@ def main():
     path = a.out or f"{os.path.splitext(a.video)[0]}.{route.replace('mac-yolo11s', 'mac')}.events.json"
     with open(path, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
-    print(f"已写 {path}：{len(wins)} 个窗口，{len(out_events)} 个计数事件；时间基准 {tb.source}（{tb.fps:.1f} 帧/秒）")
+    print(f"已写 {path}：{len(ranges)} 段，{len(out_events)} 个计数事件；时间基准 {tb.source}（{tb.fps:.1f} 帧/秒）")
 
 
 if __name__ == "__main__":

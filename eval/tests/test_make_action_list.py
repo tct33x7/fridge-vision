@@ -38,17 +38,25 @@ class TestPlan(unittest.TestCase):
         self.assertEqual(mal.plan(mal.DEFAULT_SPEC, 3, 5), mal.plan(mal.DEFAULT_SPEC, 3, 5))
 
     def test_truth_templates_have_groups_the_scorer_understands(self):
-        chunks, left = mal.plan(mal.DEFAULT_SPEC, 3, 1)
-        with tempfile.TemporaryDirectory() as d:
-            mal.write(d, chunks, mal.DEFAULT_SPEC, 1, left)
-            t = sa.load_json(os.path.join(d, "s1.truth.json"))
-            self.assertTrue(os.path.isfile(os.path.join(d, "s1_动作清单.md")))
-            for a in t["actions"]:
+        multi = 0
+        for seed in range(10):
+            chunks, left = mal.plan(mal.DEFAULT_SPEC, 3, seed)
+            with tempfile.TemporaryDirectory() as d:
+                mal.write(d, chunks, mal.DEFAULT_SPEC, seed, left)
+                self.assertTrue(os.path.isfile(os.path.join(d, "s1_动作清单.md")))
+                acts = [a for k in (1, 2, 3) for a in sa.load_json(os.path.join(d, f"s{k}.truth.json"))["actions"]]
+            multi += sum(1 for a in acts if a.get("cls_multi"))
+            for a in acts:
                 tags = sa.tags_of(a)
                 if a["delta"] != 0 and "门格" in a["where"]:
                     self.assertIn("门格", tags)
-                if a["delta"] != 0 and a["cls"] is None:
+                if a["delta"] != 0 and a["cls"] is None and not a.get("cls_multi"):
                     self.assertIn("YOLO 不认识", tags)
+                if a.get("cls_multi"):
+                    self.assertEqual(len(a["cls_multi"]), abs(a["delta"]))
+                    self.assertNotIn("YOLO 不认识", tags)
+                self.assertIn(f"抽签分组：{a['group']}", tags)
+        self.assertGreater(multi, 0)   # 10 个种子里至少有一次两样不同的东西一起拿
 
 
 if __name__ == "__main__":

@@ -37,11 +37,15 @@ def main():
     tb = timebase.load(a.video, fps_override=a.fps)
     t0 = a.start if a.start is not None else tb.t[0]
     t1 = a.end if a.end is not None else tb.t[-1]
-    seconds = list(range(int(np.ceil(t0)), int(np.floor(t1)) + 1))
-    if len(seconds) < a.n:
-        sys.exit(f"{t0:.0f}–{t1:.0f} 秒只有 {len(seconds)} 个整秒，不够抽 {a.n} 帧")
-    picks = sorted(random.Random(a.seed).sample(seconds, a.n))
-    want = {min(len(tb) - 1, tb.frame_at(s)): s for s in picks}
+    # 每个"真的录到了画面"的整秒取第一帧当候选（暂停的那几秒没有画面，不算）
+    first = {}
+    for i, t in enumerate(tb.t):
+        if t0 <= t <= t1:
+            first.setdefault(int(t), i)
+    if len(first) < a.n:
+        sys.exit(f"{t0:.0f}–{t1:.0f} 秒里只有 {len(first)} 个整秒录到了画面，不够抽 {a.n} 帧")
+    picks = sorted(random.Random(a.seed).sample(sorted(first), a.n))
+    want = {first[s]: s for s in picks}
 
     tiles = []
     cap = cv2.VideoCapture(a.video)

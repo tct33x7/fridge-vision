@@ -140,9 +140,12 @@ def plan(spec, sessions, seed):
                 inside[i["name"]] = place
             else:
                 inside.pop(i["name"], None)
-        cls = its[0]["cls"] if len({i["cls"] for i in its}) == 1 else [i["cls"] for i in its]
-        actions.append({"item": " + ".join(i["name"] for i in its), "cls": cls, "delta": sign * len(its),
-                        "where": place, "how": HOW[group], "group": group, "tags": tags})
+        same = len({i["cls"] for i in its}) == 1
+        act = {"item": " + ".join(i["name"] for i in its), "cls": its[0]["cls"] if same else None,
+               "delta": sign * len(its), "where": place, "how": HOW[group], "group": group, "tags": tags}
+        if not same:
+            act["cls_multi"] = [i["cls"] for i in its]   # 两样不同的东西：每样都要对，不是"叫哪个都行"
+        actions.append(act)
 
     # 按顺序平均分到几段（每段接着上一段结束时冰箱里的状态）
     size = -(-len(actions) // sessions)
@@ -162,8 +165,11 @@ def write(out_dir, chunks, spec, seed, left_inside):
         for n, a in enumerate(acts, start=1):
             verb = {1: "放入", -1: "拿出", 2: "放入两样", -2: "拿出两样", 0: "不放不拿"}[a["delta"]]
             lines.append(f"| {n} | {a['item']} | {verb} | {a['where']} | {a['how']} | |")
-            truth["actions"].append({"n": n, "item": a["item"], "cls": a["cls"], "delta": a["delta"],
-                                     "where": a["where"] if a["where"] != "—" else "—", "tags": a["tags"]})
+            row = {"n": n, "item": a["item"], "cls": a["cls"], "delta": a["delta"], "where": a["where"],
+                   "group": a["group"], "tags": a["tags"]}
+            if a.get("cls_multi"):
+                row["cls_multi"] = a["cls_multi"]
+            truth["actions"].append(row)
         with open(os.path.join(out_dir, f"s{s}_动作清单.md"), "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
         with open(os.path.join(out_dir, f"s{s}.truth.json"), "w", encoding="utf-8") as f:

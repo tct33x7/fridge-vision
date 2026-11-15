@@ -58,22 +58,42 @@ class TestTimeBase(unittest.TestCase):
         self.assertAlmostEqual(tb.t[10], 10.0)
         self.assertEqual(tb.frame_at(5.0), 10)
 
-    def test_sidecar_mismatch_pads_and_truncates(self):
+    def test_small_mismatch_pads_or_truncates(self):
         self.write_side([i / 15 for i in range(18)])
         err = io.StringIO()
         with redirect_stderr(err):
             tb = timebase.load(self.video)
         self.assertEqual(len(tb), 20)
         self.assertAlmostEqual(tb.t[19] - tb.t[18], 1 / 15)
-        self.assertIn("不一致", err.getvalue())
-        self.write_side([i / 15 for i in range(25)])
-        tb = timebase.load(self.video, quiet=True)
-        self.assertEqual(len(tb), 20)
+        self.assertIn("差 2 帧", err.getvalue())
+        self.write_side([i / 15 for i in range(22)])
+        self.assertEqual(len(timebase.load(self.video, quiet=True)), 20)
 
-    def test_fps_override(self):
+    def test_big_mismatch_is_an_error(self):
+        self.write_side([i / 15 for i in range(10)])
+        with self.assertRaises(SystemExit):
+            timebase.load(self.video, quiet=True)
+
+    def test_fps_override_without_sidecar(self):
         tb = timebase.load(self.video, fps_override=15)
         self.assertEqual(tb.source, "fps_override")
         self.assertAlmostEqual(tb.t[15], 1.0)
+
+    def test_sidecar_beats_fps_override(self):
+        self.write_side([i / 12 for i in range(20)])
+        err = io.StringIO()
+        with redirect_stderr(err):
+            tb = timebase.load(self.video, fps_override=30)
+        self.assertEqual(tb.source, "sidecar")
+        self.assertAlmostEqual(tb.fps, 12, places=3)
+        self.assertIn("忽略 --fps", err.getvalue())
+
+    def test_fps_between(self):
+        t = [i / 30 for i in range(20)]
+        t += [t[-1] + (i + 1) / 15 for i in range(20)]
+        tb = timebase.TimeBase(t, "sidecar", timebase.median_fps(t))
+        self.assertAlmostEqual(tb.fps_between(0, 20), 30, places=3)
+        self.assertAlmostEqual(tb.fps_between(20, 40), 15, places=3)
 
 
 if __name__ == "__main__":

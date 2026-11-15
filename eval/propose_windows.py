@@ -9,7 +9,10 @@
   python eval/propose_windows.py 录像.mp4 --plain                # 拼图上什么都不画（给同学盲标用）
 
 然后在真值里给每个动作写 "window": 编号（一个动作跨两个窗口就写 [3, 4]），
-秒表、筷子这些不算的窗口写进 "ignore_windows": [1, 2]。
+秒表、筷子、做错重来这些不算的窗口写进 "ignore_windows": [1, 2]。每个窗口都要写到其中一处，否则打分会停下来提醒。
+
+窗口文件已经有了，再运行时**不会重新切**，只是重新出拼图（加 --boxes 或 --plain 时就是这样用的），这样真值里填的窗口编号不会变。
+真要重新切，加 --recompute：旧的窗口文件会先备份，真值里的窗口编号要重新核对。
 
 怎么切：每 0.1 秒取一帧，缩成 160 像素宽的灰度图，和上一张比，变化超过 --diff 的像素占比 > --thresh 就算"在动"。
 连续在动的段，间隔小于 --gap 秒的合并，短于 --min-len 秒的丢掉，前后各放宽 --pad 秒。
@@ -148,36 +151,54 @@ def main():
     ap.add_argument("--boxes", help="检测缓存（*.dets.json），拼图上画框")
     ap.add_argument("--plain", action="store_true", help="拼图上什么都不画（盲标用）")
     ap.add_argument("--out", help="窗口文件；默认 <录像名>.windows.json")
+    ap.add_argument("--recompute", action="store_true", help="窗口文件已经有了也重新切（旧的先备份）")
     a = ap.parse_args()
 
     tb = timebase.load(a.video, fps_override=a.fps)
     roi = [float(v) for v in a.roi.split(",")] if a.roi else None
-    series = motion_series(a.video, tb, diff=a.diff, roi=roi)
-    wins = segments(series, a.thresh, a.gap, a.min_len, a.pad, tb.t[-1])
+    stem = os.path.splitext(a.video)[0]
+    path = a.out or stem + ".windows.json"
+    reuse = os.path.isfile(path) and not a.recompute
+    if reuse:
+        old = json.load(open(path, encoding="utf-8"))
+        if old.get("time_base", {}).get("frames") not in (None, len(tb)):
+            sys.exit(f"{path} 是按 {old['time_base']['frames']} 帧切的，现在的录像有 {len(tb)} 帧：不是同一段录像？")
+        wins = [{k: v for k, v in w.items() if k != "sheet"} for w in old["windows"]]
+        print(f"用已有的窗口文件 {path}（{len(wins)} 个窗口），只重新出拼图；要重新切加 --recompute")
+    else:
+        if os.path.isfile(path):
+            bak = path.replace(".windows.json", "") + f".windows.bak{int(os.path.getmtime(path))}.json"
+            os.replace(path, bak)
+            print(f"！旧的窗口文件备份成 {bak}；真值里的窗口编号要重新核对")
+        series = motion_series(a.video, tb, diff=a.diff, roi=roi)
+        wins = segments(series, a.thresh, a.gap, a.min_len, a.pad, tb.t[-1])
     truth_path = a.truth or os.path.splitext(a.video)[0] + ".truth.json"
     line = None
     if os.path.isfile(truth_path):
         line = json.load(open(truth_path, encoding="utf-8")).get("line")
-    boxes = json.load(open(a.boxes, encoding="utf-8"))["dets"] if a.boxes else None
-    stem = os.path.splitext(a.video)[0]
-    out_dir = stem + ("_windows_plain" if a.plain else "_windows")
+    boxes = None
+    if a.boxes:
+        bd = json.load(open(a.boxes, encoding="utf-8"))
+        if len(bd["dets"]) != len(tb):
+            sys.exit(f"{a.boxes} 有 {len(bd['dets'])} 帧，录像有 {len(tb)} 帧：不是这段录像的检测缓存？")
+        boxes = bd["dets"]
+    out_dir = stem + ("_windows_plain" if a.plain else "_windows_boxes" if boxes else "_windows")
     contact_sheets(a.video, tb, wins, out_dir, boxes=boxes, line=line, plain=a.plain)
-    out = {"video": os.path.basename(a.video), "time_base": tb.describe(),
-           "params": {"thresh": a.thresh, "diff": a.diff, "gap": a.gap, "min_len": a.min_len, "pad": a.pad,
-                      "roi": roi, "step_s": 0.1},
-           "windows": wins}
-    path = a.out or stem + ".windows.json"
-    if a.plain and os.path.isfile(path) and not a.out:
-        path = stem + ".windows_plain.json"     # 盲标用的不要盖掉正式的窗口文件
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=1)
+    if not reuse:
+        out = {"video": os.path.basename(a.video), "time_base": tb.describe(),
+               "params": {"thresh": a.thresh, "diff": a.diff, "gap": a.gap, "min_len": a.min_len, "pad": a.pad,
+                          "roi": roi, "step_s": 0.1},
+               "windows": wins}
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=1)
     with open(os.path.join(out_dir, "index.md"), "w", encoding="utf-8") as f:
         f.write(f"# {os.path.basename(a.video)} 的候选窗口（{len(wins)} 个）\n\n")
         f.write("| 窗口 | 开始 | 结束 | 时长 | 图 |\n| --- | --- | --- | --- | --- |\n")
         for w in wins:
             f.write(f"| {w['n']} | {w['start_s']:.1f}s | {w['end_s']:.1f}s | {w['end_s'] - w['start_s']:.1f}s | "
                     f"![]({w.get('sheet', '')}) |\n")
-    print(f"时间基准：{tb.source}（{tb.fps:.1f} 帧/秒）。找到 {len(wins)} 个窗口，写在 {path}，拼图在 {out_dir}/")
+    print(f"时间基准：{tb.source}（{tb.fps:.1f} 帧/秒）。{len(wins)} 个窗口{'（沿用）' if reuse else ''}，"
+          f"窗口文件 {path}，拼图在 {out_dir}/")
     for w in wins:
         print(f"  窗口 {w['n']:2d}：{w['start_s']:7.1f} – {w['end_s']:7.1f} 秒（{w['end_s'] - w['start_s']:.1f} 秒）")
 

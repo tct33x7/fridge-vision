@@ -23,14 +23,16 @@ class TestParity(unittest.TestCase):
             self.skipTest(f"没有 {video} 或它的检测缓存")
         import replay
         from counter import PRESETS
-        d = json.load(open(cache, encoding="utf-8"))
+        with open(cache, encoding="utf-8") as f:
+            d = json.load(f)
         want, _ = replay.run_counter(d, PRESETS["default"], line)
         with tempfile.TemporaryDirectory() as tmp:
             out = os.path.join(tmp, "e.json")
             subprocess.run([sys.executable, os.path.join(REPO, "eval", "events_mac.py"), video, "--windows", "whole",
                             "--line", ",".join(map(str, line)), "--out", out, "--cache-dir", VIDEOS],
                            check=True, capture_output=True)
-            got = json.load(open(out, encoding="utf-8"))["events"]
+            with open(out, encoding="utf-8") as f:
+                got = json.load(f)["events"]
         self.assertEqual([(e["frame"], e["tid"], e["cls"], e["delta"]) for e in got],
                          [(e["frame"], e["tid"], e["cls"], e["delta"]) for e in want])
 
