@@ -1,0 +1,140 @@
+# eval/：逐动作评测
+
+**一句话**：录像里每一个真实动作（放入、拿出、空开门）单独打分，并且和用哪条识别路线无关。
+Mac 上的 YOLO11s、板子的计数管线、以后的其他路线，只要输出同一种"事件文件"，就能放进同一张表里比较。
+
+为什么要逐动作：按"总数"比（`replay.py` 对真实录像就是这样）会让多计和漏计互相抵消；
+长尾物品（YOLO 不认识的东西）根本不在 `expected` 里，漏了也看不出来。
+
+## 用到的文件
+
+| 文件 | 做什么 |
+| --- | --- |
+| `timebase.py` | 第 i 帧是第几秒。优先用新版录制工具记的 `<录像名>.frames.json`，没有就按文件头（会提示） |
+| `propose_windows.py` | 按"画面在动"把长录像切成候选窗口，每个窗口出一张缩略图拼图（可选画检测框，或什么都不画给盲标用） |
+| `events_mac.py` | Mac 路线：YOLO11s + ultralytics ByteTrack + `demos/yolo_web_counter/counter.py`，按动作窗口计数，输出事件文件 |
+| `../orangepi_app/tools/simulate_counter.py --events-json` | 板子路线：板子上同一份计数代码（含画面判断开门和待机）。`--engine cpu-lite` 在 Mac 上用板子的追踪器（代理），`--engine npu` 只能在板子上跑 |
+| `score_actions.py` | 真值 + 一个或多个事件文件 → 逐动作表和分组汇总（markdown） |
+| `wilson.py` | **还没有，由项目发起人自己写**：函数 `wilson(k, n)`，返回 95% 区间 `(下限, 上限)`（0–1 之间）。放在这里后，打分表自动带区间 |
+| `tests/` | 打分规则、时间基准的单元测试；和 `replay.py` 的对照检查 |
+
+用 `demos/yolo_web_counter/.venv/bin/python` 运行（`simulate_counter.py` 用 `fridge_vision/.venv/bin/python`，和以前一样）。
+
+## 录完一段以后怎么做（例：E03 机位 A）
+
+下面的命令都在仓库根目录运行；`R=fridge_vision/runs/e03_position_20261112`。
+
+```bash
+PY=demos/yolo_web_counter/.venv/bin/python; R=fridge_vision/runs/e03_position_20261112
+```
+
+**1. 切窗口、看拼图**（大约 1 分钟）
+
+```bash
+$PY eval/propose_windows.py $R/A_201500.mp4
+open $R/A_201500_windows/
+```
+
+每个窗口一张图，图上有时间。对照动作清单，记下"哪个窗口是第几个动作"；秒表、筷子这些不算的窗口也记下。
+切得不对时可以调 `--thresh`（默认 0.02，越大越不敏感）和 `--gap`（默认 2.5 秒），或者干脆在真值里手写时间。
+
+**2. 补真值**（`$R/A.truth.json`，每个动作加几项）
+
+```json
+{
+ "video": "A_201500.mp4",
+ "line": [1, 0.42, 0, 0.42],
+ "ignore_windows": [1, 2],
+ "actions": [
+  {"n": 1, "item": "瓶 1", "cls": "bottle", "delta": 1, "where": "里面搁板·最上层", "window": 3,
+   "visible": "✓", "boxed": "✓"},
+  {"n": 5, "item": "生（YOLO 不认识）", "cls": null, "delta": 1, "where": "里面搁板·最下层", "window": 7,
+   "visible": "✓", "boxed": "✗"}
+ ]
+}
+```
+
+| 字段 | 意思 |
+| --- | --- |
+| `video` | 录像文件名（找 `.windows.json` 用） |
+| `line` | 计数线 `[ax, ay, bx, by]`，归一化坐标；**A→B 方向的左侧是 +1（放入）**。画面上边对着冰箱里面、线是横线时，写成从右到左 `[1, y, 0, y]` |
+| `actions[].window` | 这个动作对应的窗口编号；跨两个窗口写 `[3, 4]`。也可以不用窗口，直接写 `"start_s"` / `"end_s"`（秒） |
+| `actions[].delta` | +1 放入、−1 拿出、0 = 不该计数（空开门、只碰到线、拿出又放回）；一次拿两样写 +2 / −2 |
+| `actions[].cls` | 真值类别（COCO 名）；YOLO 不认识的东西写 `null`，这一项只按方向打分。可以写成列表表示都算对，如 `["bottle", "cup"]` |
+| `actions[].where` | 含"门格"→ 门格组；含"搁板"→ 搁板组；否则"其他位置" |
+| `actions[].tags` | 额外分组，例如 `["快速"]`、`["一手两样"]` |
+| `actions[].visible` | ① 人眼看录像能不能认出手里是什么：`✓` / `△` / `✗` / `—`（拍不到）。只有 `✓` 算 |
+| `actions[].boxed` | ② 东西过线时检测器有没有在它上面画出框（任意类别都算）：`✓` / `✗`。看第 3 步带框的拼图来勾 |
+| `ignore` / `ignore_windows` | 不算的时间段 `[[开始, 结束], …]` / 不算的窗口编号 |
+
+**3. 跑路线、出事件文件**
+
+```bash
+# Mac 路线（检测结果会缓存，第二次很快）
+$PY eval/events_mac.py $R/A_201500.mp4 --truth $R/A.truth.json
+# 同一份检测，换成板子上的排除名单（61 类）
+$PY eval/events_mac.py $R/A_201500.mp4 --truth $R/A.truth.json --exclude board
+# 板子代码的代理（Mac 上；检测器不同，追踪器和计数代码和板子一样）
+fridge_vision/.venv/bin/python orangepi_app/tools/simulate_counter.py $R/A_201500.mp4 --engine cpu-lite \
+    --model demos/yolo_web_counter/models/yolo11s.pt --truth $R/A.truth.json \
+    --events-json $R/A_201500.board-lite.events.json
+# 带检测框的拼图（勾 ② 用）
+$PY eval/propose_windows.py $R/A_201500.mp4 --boxes $R/A_201500.light-off.conf-0.35.img-640.dets.json
+```
+
+**4. 打分**
+
+```bash
+$PY eval/score_actions.py $R/A.truth.json $R/A_201500.mac-default-pc.events.json \
+    $R/A_201500.board-lite.events.json --md $R/A.score.md
+open $R/A.score.md
+```
+
+表里每个分组一行：① 人眼能认出、② 检测器框到、③ 计数正确、方向对、净数对、类别也对，都写成 k/n。
+有 `eval/wilson.py` 时自动加 95% 区间。
+
+## 打分规则
+
+这些规则在看到 E03 / E04 数据之前写定，`tests/test_score_actions.py` 逐条检查。要改规则，先在实验记录里写清为什么改，再重新跑所有录像。
+
+- **事件归属**：动作按开始时间排序。第 i 个动作管 `[开始ᵢ − 0.5 秒, 开始ᵢ₊₁ − 0.5 秒)` 里的事件，最后一个动作管到录像结束。
+  第一个动作之前的事件算"窗口外的误计"；落在 `ignore` 时间段里的事件不算。
+  （为什么不用结束时间：板子路线要等静止 6 秒才待机，事件可能在动作结束后几秒才出来。动作之间至少停 10 秒，所以用"到下一个动作开始"来划分。）
+- **有物品的动作**（真值 `delta = ±n`）：
+  - ③ **计数正确** = 方向对的事件正好 n 个，并且没有方向反的事件
+  - **方向对** = 至少 1 个方向对的事件，并且没有方向反的事件
+  - **净数对** = 所有事件加起来正好等于 delta（"只看最后"的口径：+1 −1 +1 也算对）
+  - **类别也对** = 计数正确时，这些事件的类别都等于真值类别。真值类别为 `null`（YOLO 不认识的东西），或计数不正确时，不算这一项
+  - 漏计 = n − 方向对的事件数（不小于 0）；多计 = 事件总数 − 算作正确的事件数
+- **不该计数的动作**（`delta = 0`：空开门、只碰到线、拿出又放回）：没有任何事件才算对。
+- **① ②** 来自人工勾选，分母是勾了的动作数（没勾的不算进分母）。
+
+## 三条路线有什么不同（写报告时要标清楚每个数字来自哪条）
+
+| 路线 | 检测 | 追踪 | 计数代码 | 开门检测 | 能在哪跑 |
+| --- | --- | --- | --- | --- | --- |
+| `mac-yolo11s-*`（`events_mac.py`） | YOLO11s @640（Mac） | ultralytics ByteTrack | `demos/.../counter.py` | **假设完美**：只在动作窗口里计数，不会有窗口外误计 | Mac |
+| `board-sim-cpu` | 同上 @320 | ultralytics ByteTrack | 板子的 `line_counter.py` + `counter_service.py` | 板子的画面判断开门和待机 | Mac / 板子 |
+| `board-sim-cpu-lite` | 同上 @320 | **板子的 ByteTrackLite** | 同上 | 同上 | Mac / 板子（代理） |
+| `board-sim-npu` | **板子 NPU YOLOv5s** | 板子的 ByteTrackLite | 同上 | 同上 | **只有板子**：这是部署版本的真实数字 |
+
+- 计数规则里按"帧"写的参数是在 30 帧/秒上定的；Mac 路线和板子一样按真实帧率等比例换算。
+- `events_mac.py` 每个窗口另外记下"有没有任何轨迹（任意类别）从线的一边到了另一边"（`crossing_tracks_any_class`），
+  可以当 ② 的自动参考，但它只看有追踪编号的框，是代理，以人工勾选为准。
+
+## 自检
+
+```bash
+BX_TEST_VIDEOS=demos/yolo_web_counter/test_videos $PY -m unittest discover -s eval/tests -v
+```
+
+- `test_score_actions.py`：上面每条打分规则。
+- `test_timebase.py`：15 帧/秒的录像配 30 帧/秒的文件头时按真实时间算；暂停；帧数对不上。
+- `test_parity_with_replay.py`：整段一个窗口时，`events_mac.py` 的计数事件和 `replay.py` 完全一样（jitter1、mix1、synthetic）。
+  需要本机的测试录像和检测缓存，没有就跳过。
+
+## 已知局限
+
+- Mac 路线和 `cpu-lite` 用的检测器不是板子上的 NPU YOLOv5s；部署版本的数字只能在板子上用 `--engine npu` 得到。
+- 窗口切分只看"画面在动"，人走过、开关灯也会切出窗口；它只是帮忙找时间，最后以人对照拼图填的为准。
+- ② "框到"是人看拼图判断的，判断标准要在勾之前写下来（例如：框和手里的东西重叠一半以上才算）。
