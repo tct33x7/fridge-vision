@@ -15,6 +15,8 @@ Mac 上的 YOLO11s、板子的计数管线、以后的其他路线，只要输�
 | `events_mac.py` | Mac 路线：YOLO11s + ultralytics ByteTrack + `demos/yolo_web_counter/counter.py`，按动作窗口计数，输出事件文件 |
 | `../orangepi_app/tools/simulate_counter.py --events-json` | 板子路线：板子上同一份计数代码（含画面判断开门和待机）。`--engine cpu-lite` 在 Mac 上用板子的追踪器（代理），`--engine npu` 只能在板子上跑 |
 | `score_actions.py` | 真值 + 一个或多个事件文件 → 逐动作表和分组汇总（markdown） |
+| `sample_frames.py` | 按时间随机抽 40 帧拼成大图，数"有几帧拍到脸"这类是非题用（E03 选机位） |
+| `make_action_list.py` | E04 抽签：按分组配额随机排动作顺序，出打印版动作清单和真值模板 |
 | `wilson.py` | **还没有，由项目发起人自己写**：函数 `wilson(k, n)`，返回 95% 区间 `(下限, 上限)`（0–1 之间）。放在这里后，打分表自动带区间 |
 | `tests/` | 打分规则、时间基准的单元测试；和 `replay.py` 的对照检查 |
 
