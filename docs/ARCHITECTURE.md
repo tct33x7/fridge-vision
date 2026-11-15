@@ -164,7 +164,7 @@ eMMC / M.2 NVMe / TF 卡、Wi-Fi 6、千兆网口、HDMI 2.0、MIPI 屏和 MIPI 
 | 采集 | `fridge_vision/record_sessions.py`（+ `run_record.command`） | 横线方向修正；门磁触发；无窗口运行；环形缓冲 |
 | 分析 | `fridge_vision/process_session.py`、`name_keyframes.py`、`vlm.py` | 横线方向；按"腿"判断手里有无和是什么；关门后自动跑 |
 | 电脑端识别（当前路线） | `demos/yolo_web_counter/` | 第 1 步已完成；第 2–5 步在它上面做（光线和抖动、待机自启动、复杂情况、OCR），第 6 步合并进主功能 |
-| 评测 | `fridge_vision/analyze_sessions.py`、各 `summary.md`、人工表 | 导入手机录像 `import_clip.py`（待写）；E01 / E04 对比表 |
+| 评测 | `fridge_vision/analyze_sessions.py`、各 `summary.md`、人工表；11-15 起 [`eval/`](../eval/)（逐动作打分） | E03 / E04 用 `eval/` 逐动作打分；E01 / E04 对比表 |
 | 后端 | `smart_fridge_app/` | 初始化库存（复用拍照录入）；事件状态 confirmed / wrong；按大模型名字定类别 |
 | 界面 | `smart_fridge_app/frontend/` | "刚才的变化" + 对 / 错 / 改；初始化向导；对账页 |
 | 主机部署 | [deploy/](../deploy/)（新，待写） | OrangePi 装机、锁曝光、门磁、开机自启、小屏全屏 |
