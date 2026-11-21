@@ -51,3 +51,32 @@
 | 学术 | YOLO-World <https://arxiv.org/abs/2401.17270>；OWL-ViT <https://arxiv.org/abs/2205.06230>；CLIP <https://arxiv.org/abs/2103.00020> | 不限于 80 类的识别办法 |
 | 背景 | UNEP 食物浪费指数 2024（联合国新闻）<https://news.un.org/en/node/1148036>；郑州家庭食物浪费称重研究（《自然资源学报》2024）<https://www.jnr.ac.cn/CN/abstract/article/1000-3037/69666> | 两者的估计差很多，因为方法不同；引用时各自写清方法 |
 | 背景 | Parker & Stedman 1992 <https://www.aceee.org/files/proceedings/1992/data/papers/SS92_Panel3_Paper21.pdf> | 美国的老数据：每天开冷藏门几十次 |
+
+### 开源项目线索（GitHub，11-21 查）
+
+下面是 Claude 11-21 在 GitHub 上搜到的（搜了"冰箱 + 相机 / 库存 / 进出""售货柜 / 无人货柜""手–物体检测""过线计数""A733 NPU"几组词，中英文都搜了）。
+和上表一样只是线索，**引用前必须自己打开读一遍**。最后一列写明 Claude 当时核对到哪一步。
+
+- **这几轮搜索里，没有找到**做"门洞上方相机 + 自动判断放入 / 拿出 + 逐动作对照真值评测"的开源项目。这是"没搜到"，不等于"不存在"。
+- **没有许可证的仓库只能借思路、在报告里引用，不能复制代码。**
+- 星标数、更新日期这些会变，这里不写；引用时以当天打开看到的为准。
+
+| 类别 | 资料 | 许可证 | 为什么相关 | 核对到哪 |
+| --- | --- | --- | --- | --- |
+| 先例：黑客松 | stphnhng/SmartFridgeImageRecognition（2017，T-Mobile IoT 黑客松）<https://github.com/stphnhng/SmartFridgeImageRecognition> | MIT | 按方向判断进出：面对相机从左往右算放入，从右往左算拿出。README 里没有准确率数字 | 读了 README 全文 |
+| 先例：课程项目 | ticiive/Smart-Fridge-User-Presented-Item-Recognition（2026-09，Ibmec 的课程作业，葡萄牙语）<https://github.com/ticiive/Smart-Fridge-User-Presented-Item-Recognition> | 无 | 相机在冰箱上方；YOLO-World 找东西，再按"OCR → CLIP → 本地大模型"三级认名，每样东西只要一张参考图，不训练。README 写：22 次经过里 20 次给出判断、19 次对（目录 6 样东西，人把东西举到相机前）；局限一节写明进和出没有自动区分，全记成放入（有按过线判方向的选项，默认关） | 读了 README 全文 |
+| 先例：课程项目 | Zilinghan/smart-fridge（FreshIO，UIUC CS598，2022）<https://github.com/Zilinghan/smart-fridge> | 无 | 光线传感器触发录像（README 说代码里是用键盘输 0 / 1 模拟的，传感器没接上）；食物检测模型自己训练；README 说主要问题是训练数据不够 | 读了 README 前半 |
+| 先例：开源 | dk0113-Y/image-based-inventory-management（2026）<https://github.com/dk0113-Y/image-based-inventory-management> | 无 | C++ 写的冰箱库存：开门前后各取一张关键帧，比较两次 YOLO 结果；事件类型里有"不确定"，进待确认；README 有一张"证据等级"表，写明真实相机和板子上还没验证 | 读了 README 全文 |
+| 先例：开源 | Dilyar93/fridge-inventory-exploration（2026-09）<https://github.com/Dilyar93/fridge-inventory-exploration> | 无 | 用前后两张图数瓶子，8 个场景 16 张图；真值分"看得见的数"和"实际的数"；每次运行记下模型哈希、库版本和阈值 | 读了 README 全文 |
+| 先例：售货柜 | liliwo0117/vending-cabinet-tight-roi-recognition（2026-11，论文的参考实现）<https://github.com/liliwo0117/vending-cabinet-tight-roi-recognition> | MIT | 售货柜商品识别：YOLO11m 找到商品 → 贴边裁图 → 小分类器；8 类测试集 632/680。阈值只在验证集上选、选完冻结、测试集只用一次、报 Wilson 区间 | 读了 README 开头 |
+| 先例：售货柜 | Kylie12347/Graduation（2026，毕业设计）<https://github.com/Kylie12347/Graduation> | 无 | 无人售货柜：重量 + RFID + 大模型看多帧图片，几个来源对不上就转人工；全部是仿真，没有真柜子 | 读了 README 开头 |
+| 先例：课程项目（不在 GitHub） | Cornell ECE 5725 Smart Fridge（2023）<https://courses.ece.cornell.edu/ece5990/ECE5725_Fall2023_Projects/4%20Friday%20December%208/2%20Smart%20Fridge/Thursday_ft243_zl874/index.html> | — | 门磁接 GPIO，扫条码认东西；放入还是拿出由用户在界面上选 | 由 Claude 的查资料子任务读的网页，没有再核对一遍 |
+| 可借的库 | roboflow/supervision 的 `LineZone`（0.32.0）<https://github.com/roboflow/supervision> | MIT | 现成的过线计数。两个参数和 `counter.py` 的滞回、丢失续接是同一类想法：`minimum_crossing_threshold`（过线后在另一侧连续看到几帧才算）、`max_absent_frames`（短暂消失后还记得在哪一侧）。可以当对照组，回答"为什么不用现成的库" | 读了这两个参数的源码和说明 |
+| 可借的库 | roboflow/trackers <https://github.com/roboflow/trackers> | Apache-2.0 | 重新实现的 SORT、ByteTrack、OC-SORT、BoT-SORT、C-BIoU、McByte。[E02b](../experiments/E02b_trackers_20261108.md) 没试过的是后两个；C-BIoU 的说明写的是针对快速或不规则运动 | 读了 README 的算法表 |
+| 可借的方法 | YOLO-World / YOLOE（开放词表检测，ultralytics 里自带）<https://github.com/AILab-CVC/YOLO-World> <https://github.com/THU-MIG/yoloe> | GPL-3.0 / AGPL-3.0 | 用文字指定要找的类别（jar、bag、box），不用训练，对付 YOLO 不认识的东西。上面 ticiive 那个项目用的就是 yolov8s-worldv2 | 只核对了本机 ultralytics 8.4.87 里有这两个类；没有跑过 |
+| 可借的方法 | 手–物体检测：ddshan/hand_object_detector（100DOH）<https://github.com/ddshan/hand_object_detector>、EvaCheng-cty/hands23_detector <https://github.com/EvaCheng-cty/hands23_detector>、AhmadDarKhalil/HOI-DETR <https://github.com/AhmadDarKhalil/HOI-DETR> | 都是 MIT | 直接找"手和手里拿着的东西"，不管东西是什么类别。三个 README 里都只有配 NVIDIA 显卡（CUDA）的装法，Mac 和板子上能不能跑没人写过 | 只按关键词看了 README |
+| 板子 | Radxa 文档：全志 A733 的 NPU 上跑 YOLO11 <https://docs.radxa.com/en/cubie/a7a/app-dev/npu-dev/model-zoo/yolo11> | — | 和 OrangePi 4 Pro 同一颗芯片：导出 ONNX → 全志 Model Zoo 的 Docker 里量化 → 导出 `.nb`。文档列的 yolo11s@640 单帧推理 31.9 ms，只算推理，而且是 Radxa 的板子，不能直接和这里板子的帧率比。转换要一台 x86 的 Linux 电脑，后处理要重写 | 读了网页 |
+| 工程参照 | blakeblackshear/frigate <https://github.com/blakeblackshear/frigate> | MIT | 家用监控：先用很省资源的运动检测，决定在哪里跑识别（第 3 步待机的参照） | 只看了 README 的功能列表 |
+| 工程参照 | grocy/grocy <https://github.com/grocy/grocy> | MIT | 自建的家庭库存管理，有 REST 接口（库存后端的参照） | 只看了 README 里的几行 |
+
+另外两条没法用的：CMU 课程项目 FreshEyes 的仓库（arstrasser/ece-capstone）11-21 已经打不开；路易斯维尔大学 Morris 的硕士论文（2020）<https://ir.library.louisville.edu/etd/3497> 看起来和上表里的 Morris 等 2021 是同一组工作，没有核实，也没找到代码。

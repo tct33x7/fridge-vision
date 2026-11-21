@@ -12,6 +12,7 @@
 | [ARCHITECTURE.md](ARCHITECTURE.md) | **系统架构 v4**（11-08）：门洞上方相机、识别流程、库存、主机与界面、待定问题 |
 | [SCHEDULE.md](SCHEDULE.md) | 日程：到 11-22 可交付、11-29 打磨 |
 | [DECISIONS.md](DECISIONS.md) | 决策日志：每个决定是谁提的、依据是什么、验证了没有 |
+| [STORY.md](STORY.md) | **开发故事**（11-21）：从旧版本到今天的时间线，每一步的出处和项目发起人在对话里的原话；GitHub 同类项目线索；谁提的决定；现在停在哪 |
 
 ## 计划与方法
 
