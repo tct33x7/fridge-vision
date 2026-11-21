@@ -93,7 +93,7 @@ cd ~/Projects/bx-project/smart_fridge_app && python3.11 -m venv .venv && .venv/b
 ## 规矩
 
 - **永不进 git**：`fridge_vision/runs/`（家里的录像）、`.env`、任何密钥、数据库。`.gitignore` 已覆盖；提交前看一眼 `git status`。
-- **GitHub**：私有仓库 [tct33x7/fridge-vision](https://github.com/tct33x7/fridge-vision)，老师和同学加为协作者。
+- **GitHub**：公开仓库 [tct33x7/fridge-vision](https://github.com/tct33x7/fridge-vision)（11-21 起公开），老师和同学加为协作者。
   改代码走分支 + Pull Request；改文档可以直接提交到 `main`；提交前先 `git pull`；提交信息写清改了什么、为什么。
 - **密钥**：`archive/smart_fridge_demo/config/api_settings.json` 里有一把真实的 DeepSeek 密钥（不在 git 里），它曾随压缩包流转，建议去控制台轮换。
   大模型密钥只通过环境变量传入（`VLM_API_KEY`）。
