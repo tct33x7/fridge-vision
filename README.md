@@ -5,17 +5,17 @@
 
 原则：真实的问题、真实的测量、每个数字有出处；把最难的部分（门口识别）做好，不求功能全。可交付版本 11-22，打磨到 11-29。
 
-## 现在到哪了（2026-11-08）
+## 现在到哪了（2026-11-15）
 
 完整的进度总结见 [docs/progress/](docs/progress/)（最新：[2026-11-08](docs/progress/2026-11-08.md)）。
 
 - **11-07** 第一次在真冰箱上测量（[实验 E01](docs/experiments/E01_front_20261107.md)，16 次真实开门 + 真值）：
-  正面机位时人会挡住冰箱，亮度触发不可靠，YOLO 只认出 2/27。
+  正面机位时人会挡住冰箱，亮度触发不可靠，YOLO 只认出 2/27（这几个数字的口径待复核，见 [CLAIMS_CHECK](docs/experiments/CLAIMS_CHECK.md)）。
 - **11-08** 和老师定下 **v4**：相机改装到门洞上方，只拍手和手里的东西；库存由用户初始化，之后靠进出事件增减；主机用 OrangePi 4 Pro。
   见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
-- **11-08 下午** 列出 7 步待办流程（[docs/SCHEDULE.md](docs/SCHEDULE.md)）。第 1 步"电脑端初步的物品进出统计"已完成：
-  [`demos/yolo_web_counter`](demos/yolo_web_counter/)，YOLO11s + ByteTrack，网页上拖线按方向计数。
-- **下一步**：第 2 步，针对光线、物品抖动优化识别；同时尽早在 OrangePi 上测一次帧率。
+- **11-08 下午** 列出 7 步待办流程（[docs/SCHEDULE.md](docs/SCHEDULE.md)）。第 1、2 步完成；第 3 步第一版部署到板子（NPU 识别、画面判断开门、待机）。
+- **11-12** E03 选机位的步骤准备好了，还没录。
+- **下一步**：E03 → 定机位、做支架 → 冻结规则 → E04 冰箱实测（见日程里的 11-15 更新）。
 
 ## 系统怎么拼起来
 
@@ -104,9 +104,9 @@ cd ~/Projects/bx-project/smart_fridge_app && python3.11 -m venv .venv && .venv/b
 | 谁 | 做了什么 |
 | --- | --- |
 | 项目发起人（TCT37） | 提出问题和方向，做每一次方向决定（见 [DECISIONS](docs/DECISIONS.md) 的"谁提出"一列）；架设相机，录制 E01 并记真值；和老师讨论定下 v4 |
-| 老师 | 11-08 架构讨论（机位、主机、界面）；硬件和大模型密钥 |
+| 老师 | 11-08 架构讨论（机位、主机、界面）；板子上的 NPU 计数引擎、轻量追踪器 `ByteTrackLite`、排除类别名单和静止物品筛选（11-08 17:04–17:23 直接在板子上改，之后收进 `orangepi_app/`，见提交 `f367e52`、`0c2a502`、`0504b6d`、`8269e11`）；第 1 步的网页计数 demo `demos/yolo_web_counter`（据 11-08 进度总结；请老师确认）；硬件和大模型密钥 |
 | 同学 | （待补充） |
-| Claude（Anthropic 的 AI，经 Claude Code） | 11-04 起这个仓库所有提交里的代码和文档文字（每个提交都带 `Co-Authored-By: Claude`），以及分析和建议 |
+| Claude（Anthropic 的 AI，经 Claude Code） | 除上面写明是老师写的代码以外，11-04 起这个仓库里的代码和文档文字（每个提交都带 `Co-Authored-By: Claude`；"同步板子"的那几个提交是 Claude 把老师的改动收进仓库），以及分析和建议 |
 | 更早的材料 | 2026 年 7–8 月的旧项目，11-04 第一次提交时整体导入：研究素材 PPT（选题、背景、接线、任务列表）、`smart_fridge_demo`（基于老师的 demo）、`smart_fridge_app`、`camera_system`、扫码枪外壳（交接文档显示在 OpenAI Codex 环境里生成） |
 
 文档里的"你"指项目发起人，"我"指 Claude。
