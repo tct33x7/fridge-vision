@@ -53,3 +53,6 @@ orangepi_app/config/api_settings.json
 orangepi_app/models/*.pt
 orangepi_app/yolo/*.onnx
 orangepi_app/.env.orangepi
+
+# judge_door.py 的输出（拼图是整幅画面，可能拍到人；只在本机）
+*_judge/
