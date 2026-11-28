@@ -297,6 +297,40 @@ class TestWholeFlow(unittest.TestCase):
         old = jd.load_json(os.path.join(self.out, "door_01", "result.prev-1.json"))
         self.assertEqual([b["delta"] for b in old["book"]], [1])   # 旧的回答留着
 
+    def test_changed_prompt_or_window_is_refused_not_reused(self):
+        model = FakeModel([reply(answer([item("放入")])), reply(answer([])), reply(answer([item("拿出")])), reply(answer([]))])
+        self.run_program(model, "--send")
+        prompt2 = os.path.join(self.tmp.name, "prompt_v5.txt")
+        with open(jd.PROMPT_FILE, encoding="utf-8") as f, open(prompt2, "w", encoding="utf-8") as g:
+            g.write(f.read() + "\n多一条规则\n")
+        with self.assertRaises(jd.JudgeError) as e:
+            self.run_program(model, "--send", "--prompt", prompt2)
+        self.assertIn("提示词", str(e.exception))
+        jd.save_json(self.windows, {"windows": [{"n": 1, "start_s": 1.0, "end_s": 3.0}, {"n": 2, "start_s": 3.0, "end_s": 5.4}]})
+        with self.assertRaises(jd.JudgeError) as e:
+            self.run_program(model, "--send")
+        self.assertIn("取的帧", str(e.exception))
+        with self.assertRaises(jd.JudgeError):
+            self.run_program(model)                              # 只切图也不行：会把判过的那几张图盖掉
+        self.assertEqual(len(model.requests), 2)                # 一张图都没有多发
+        self.assertEqual([b["delta"] for b in self.result(1)["book"]], [1])
+        self.run_program(model, "--send", "--again")             # 说清楚要重判，才重判
+        self.assertEqual(len(model.requests), 4)
+        self.assertEqual(self.result(1)["settings"]["frames"], [30, 45, 60, 75, 90])
+        self.assertEqual(self.result(1)["effort"], "medium")
+
+    def test_existing_events_file_is_refused_before_anything_is_sent(self):
+        events = os.path.join(self.tmp.name, "events.json")
+        jd.save_json(events, {})
+        model = FakeModel([])
+        with self.assertRaises(jd.JudgeError):
+            self.run_program(model, "--send", "--events-json", events)
+        self.assertEqual(model.requests, [])
+
+    def test_again_needs_send(self):
+        with self.assertRaises(SystemExit), mock.patch("sys.stderr"):
+            jd.parse_args([self.video, "--again"])
+
     def test_refusal_and_cut_off_answers_become_questions(self):
         model = FakeModel([reply(stop_reason="refusal"), reply(text='{"timeline": "01：', stop_reason="max_tokens")])
         self.run_program(model, "--send")

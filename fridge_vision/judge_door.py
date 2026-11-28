@@ -386,6 +386,22 @@ def sha256_text(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+SETTING_NAMES = {"frames": "取的帧（开门的起止时间）", "prompt_sha256": "提示词", "model": "模型", "effort": "effort",
+                 "frames_per_second": "每秒几帧", "cell": "拼图格子大小", "jpeg_quality": "JPEG 质量"}
+
+
+def judge_settings(args, prompt_info, picks):
+    """决定"发出去的是什么、怎么问"的那几样。和以前判过的一样，才能拿以前的回答来用。"""
+    return {"frames": [i for i, _ in picks], "prompt_sha256": prompt_info["sha256"], "model": args.model,
+            "effort": args.effort, "frames_per_second": FRAMES_PER_SECOND, "cell": list(CELL), "jpeg_quality": JPEG_QUALITY}
+
+
+def changed_settings(old, settings):
+    """以前那次判断和这次的设置哪里不一样（以前的结果没记设置，就当全都不一样）。"""
+    before = old.get("settings") or {}
+    return [SETTING_NAMES[k] for k in settings if before.get(k) != settings[k]]
+
+
 def load_doors(args, time_base):
     """这段录像里要判哪几次开门：[{"door": 编号, "start_s": 开始, "end_s": 结束}, …]。"""
     if args.windows:
@@ -425,6 +441,8 @@ def run(args, client=None, say=print):
     """主流程。client 可以从外面给（测试时用假的）；不给就在要发的时候自己建。返回每次开门的结果列表。"""
     if not os.path.isfile(args.video):
         raise JudgeError(f"找不到录像：{args.video}")
+    if args.events_json and os.path.exists(args.events_json):
+        raise JudgeError(f"已存在，不覆盖：{args.events_json}")
     with open(args.prompt, encoding="utf-8") as f:
         prompt_text = f.read()
     prompt_info = {"file": os.path.basename(args.prompt), "sha256": sha256_text(prompt_text)}
@@ -438,6 +456,14 @@ def run(args, client=None, say=print):
         if not d["picks"] or blank > MAX_BLANK_S:
             raise JudgeError(f"第 {d['door']} 次开门（{d['start_s']:.1f}–{d['end_s']:.1f} 秒）里有 {blank:.1f} 秒没有画面："
                              "录像在这一段停过，或者时间写错了")
+        d["settings"] = judge_settings(args, prompt_info, d["picks"])
+        result_path = os.path.join(out_dir, f"door_{d['door']:02d}", "result.json")
+        old = load_json(result_path) if os.path.exists(result_path) else None
+        if old and old.get("sent") and not args.again:
+            changed = changed_settings(old, d["settings"])
+            if changed:
+                raise JudgeError(f"第 {d['door']} 次开门以前判过，但这次的{'、'.join(changed)}和那次不一样（结果在 {result_path}）。"
+                                 "要照现在的设置重判，加 --send --again（旧的回答会留着）；或者用 --out 换一个输出目录")
     cells = read_cells(args.video, [i for d in doors for i, _ in d["picks"]])
 
     results, announced = [], False
@@ -451,7 +477,8 @@ def run(args, client=None, say=print):
         result = {
             "schema": "door-judgement-v1", "video": os.path.basename(args.video), "door": d["door"],
             "start_s": d["start_s"], "end_s": d["end_s"], "frames": [i for i, _ in d["picks"]], "sheets": len(jpegs),
-            "prompt": prompt_info, "model": args.model, "sent": False, "answer": None, "problem": None,
+            "prompt": prompt_info, "model": args.model, "effort": args.effort, "settings": d["settings"],
+            "sent": False, "answer": None, "problem": None,
             "book": [], "unchanged": [], "ask": [], "call": None, "made_at": now_text(),
         }
         head = f"第 {d['door']} 次开门（{d['start_s']:.1f}–{d['end_s']:.1f} 秒，{len(d['picks'])} 帧，{len(jpegs)} 张图）"
@@ -510,8 +537,6 @@ def run(args, client=None, say=print):
     if args.events_json and any(not r["sent"] and not r["problem"] for r in results):
         say("有的开门还没有问过模型，所以没有写事件文件。")
     elif args.events_json:
-        if os.path.exists(args.events_json):
-            raise JudgeError(f"已存在，不覆盖：{args.events_json}")
         save_json(args.events_json, to_events(os.path.basename(args.video), time_base.describe(), results, args.route))
         say(f"事件文件：{args.events_json}")
     return results
@@ -534,6 +559,8 @@ def parse_args(argv=None):
     args = ap.parse_args(argv)
     if args.windows and (args.start is not None or args.end is not None):
         ap.error("--windows 和 --start / --end 只能用一种")
+    if args.again and not args.send:
+        ap.error("--again 要和 --send 一起用")
     return args
 
 
