@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>冰箱门口自动记账 · 思考记录</title>
+<meta name="description" content="一个冰箱自动记账项目的复盘：想法是怎么一步接一步长出来的，每一步是怎么借助 AI 工具展开的。">
+<style>
+  :root {
+    --bg: #fafaf8;
+    --text: #1d1c1a;
+    --muted: #6a6762;
+    --line: #e2dfd9;
+    --accent: #0b6e62;
+    --warn: #9a4a00;
+    --quote-bg: #f1efea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614;
+      --text: #ecebe7;
+      --muted: #a09c95;
+      --line: #33312d;
+      --accent: #5cc4b4;
+      --warn: #e6a15a;
+      --quote-bg: #201f1c;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI", sans-serif;
+    font-size: 17px;
+    line-height: 1.75;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 56px 20px 72px; }
+  h1 { font-size: 30px; line-height: 1.3; margin: 0 0 12px; font-weight: 700; }
+  h2 { font-size: 21px; line-height: 1.4; margin: 64px 0 8px; font-weight: 700; }
+  h3 { font-size: 18px; line-height: 1.5; margin: 0 0 6px; font-weight: 700; }
+  p { margin: 0 0 14px; }
+  a { color: var(--accent); }
+  .lede { font-size: 19px; }
+  .meta { color: var(--muted); font-size: 14px; margin: 0 0 28px; }
+  .small { color: var(--muted); font-size: 14px; }
+  .intro { color: var(--muted); font-size: 15px; margin-bottom: 20px; }
+  .toc { margin: 4px 0 8px; padding-left: 28px; font-size: 15.5px; }
+  .toc li { margin-bottom: 3px; }
+  .toc a { text-decoration: none; }
+  .toc a:hover, .toc a:focus { text-decoration: underline; }
+  .more { margin: 0 0 8px; padding-left: 28px; font-size: 15.5px; list-style: none; }
+  .more li { margin-bottom: 3px; }
+  .more a { text-decoration: none; }
+  .more a:hover, .more a:focus { text-decoration: underline; }
+  .steps { counter-reset: step; margin-top: 28px; }
+  .step { padding: 32px 0 28px; border-top: 1px solid var(--line); counter-increment: step; }
+  .step h3::before { content: counter(step) "　"; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .when { color: var(--muted); font-size: 14px; margin: 0 0 14px; }
+  .next { margin: 20px 0 0; font-weight: 600; }
+  .next span { display: block; font-weight: 400; font-size: 13px; color: var(--muted); }
+  blockquote { margin: 0 0 14px; padding: 10px 14px; background: var(--quote-bg); font-size: 15.5px; }
+  blockquote + blockquote { margin-top: -8px; }
+  blockquote cite { display: block; font-style: normal; color: var(--muted); font-size: 13px; margin-top: 4px; }
+  li > blockquote { margin: 6px 0 0; }
+  .note { color: var(--warn); }
+  ul.plain { margin: 0 0 14px; padding-left: 20px; }
+  ul.plain li { margin-bottom: 10px; }
+  ol.plain-ol { margin: 0 0 14px; padding-left: 24px; }
+  ol.plain-ol li { margin-bottom: 10px; }
+  .sub { margin-top: 36px; margin-bottom: 12px; }
+  .empty { border: 1px dashed var(--line); padding: 16px; color: var(--muted); }
+  .figures { display: grid; grid-template-columns: 1fr 1fr; gap: 26px 24px; margin: 12px 0 0; padding: 0; list-style: none; }
+  .num { display: block; font-size: 26px; font-weight: 700; line-height: 1.2; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .cap { display: block; font-size: 15px; margin-top: 6px; }
+  .remark { margin-top: 20px; padding-top: 14px; border-top: 1px dashed var(--line); }
+  .note-item { margin-bottom: 14px; }
+  .note-head { color: var(--muted); font-size: 13px; }
+  .note-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+  button.link { background: none; border: 0; padding: 0; margin-left: 10px; font: inherit; font-size: 13px; color: var(--accent); cursor: pointer; text-decoration: underline; }
+  .remark label { display: block; font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+  .remark textarea { display: block; width: 100%; font: inherit; font-size: 15.5px; line-height: 1.6; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; resize: vertical; min-height: 64px; }
+  .remark-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; flex-wrap: wrap; }
+  .remark button.submit { font: inherit; font-size: 15px; padding: 6px 18px; border: 0; border-radius: 6px; background: var(--accent); color: var(--bg); cursor: pointer; }
+  .remark button.submit:disabled { opacity: 0.6; cursor: default; }
+  .remark .hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+  footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+  @media (max-width: 560px) {
+    body { font-size: 16px; }
+    main { padding: 36px 16px 56px; }
+    h1 { font-size: 25px; }
+    .figures { grid-template-columns: 1fr; gap: 20px; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>冰箱门口自动记账 · 思考记录</h1>
+  <p class="meta">2026-11-04 → 11-23 · 项目发起人是一名初中生 · 时间是北京时间</p>
+  <p class="lede">想做的事：冰箱门一开，门口上方的相机看着手往里放、往外拿的东西；门一关，库存自动更新。</p>
+  <p>这一页是对整个项目的一次复盘。它不按"哪天做了什么"来记，而是按想法出现的先后来记：每一段从上一段留下的问题开始，写当时怎么想、借助 AI 工具怎么去试、试出来什么，最后写这一段又留下了什么问题。</p>
+  <p class="small">灰底的字都是项目发起人在和 AI 的对话里打的原话，放在「」里，照录，错别字也没改；标了"（点选）"的，是在 AI 给的几个选项里点的那一项。其余的文字是 Claude（AI）照对话记录、实验记录和决策日志整理的。记录里没有原话的地方，照实写了没有，没有替本人补。每一段下面都可以留备注：只能写文字，最多 300 个字。备注是打开这一页的人留的，没有核实是谁写的。</p>
+</header>
+
+<section id="growth">
+  <h2>想法是怎么长出来的</h2>
+  <p class="intro">一共 17 段，一段接着一段。</p>
+  <ol class="toc">
+    <li><a href="#start">起点：记账不能要人多做一步</a></li>
+    <li><a href="#watch">看什么：不看冰箱里有什么，看手里进出什么</a></li>
+    <li><a href="#line">第一个做法：小模型认东西，过线算一次</a></li>
+    <li><a href="#doubt">这个做法对不对，不能只听 AI 的</a></li>
+    <li><a href="#measure">上真冰箱量一次</a></li>
+    <li><a href="#above">换个地方看：门洞上方，只看手</a></li>
+    <li><a href="#inside">看不到里面，规则还成立吗</a></li>
+    <li><a href="#check">什么才算"测过"</a></li>
+    <li><a href="#posd">新位置的第一个数：8 个里数对 0–1 个</a></li>
+    <li><a href="#cabinet">是线画错了，还是看法错了：想到智能售货柜</a></li>
+    <li><a href="#hand">换一种判法：看手伸进去之前和出来以后拿着什么</a></li>
+    <li><a href="#name">判对了进出，还要认出是哪一样</a></li>
+    <li><a href="#cost">判得对，还要用得起</a></li>
+    <li><a href="#twocam">要不要第二台相机：商用的都是双摄</a></li>
+    <li><a href="#three">照写定的做法测一次：没有测成，只录到三个动作</a></li>
+    <li><a href="#reuse">先不测了：手头的录像还能说明什么</a></li>
+    <li><a href="#done">什么叫做成了</a></li>
+  </ol>
+  <ul class="more">
+    <li><a href="#look-back">回头看：想法是沿着哪几条线长出来的</a></li>
+    <li><a href="#ai-how">借助 AI 工具，是怎么一步步展开的</a></li>
+    <li><a href="#ai-think">对 AI 工具的思考</a></li>
+    <li><a href="#now">现在到哪了</a></li>
+  </ul>
+
+  <div class="steps">
+
+    <article class="step" id="start" data-slot="start">
+      <h3>起点：记账不能要人多做一步</h3>
+      <p class="when">更早，2026 年 7–8 月</p>
+      <p>这个项目之前有过一版：用手机拍照识别，再加一把扫码枪，记冰箱里有什么。计划书里是这样写它的："技术上能用，但要用户多做一步，于是没人用。所以这一期把交互压到零：开门即记账……"</p>
+      <p class="small">这句话是 AI 写进计划书的。那一版在家里实际用得怎么样、为什么想换，记录里没有项目发起人的原话。</p>
+      <p>整个项目的出发点就在这里：记账不能要人多做一步。人只管开冰箱门、放东西、拿东西，账要自己记上。</p>
+      <p class="next"><span>留下的问题</span>要它自己发生，就得有东西替人看着。看什么？</p>
+    </article>
+
+    <article class="step" id="watch" data-slot="watch">
+      <h3>看什么：不看冰箱里有什么，看手里进出什么</h3>
+      <p class="when">11-04</p>
+      <p>11-04 晚上，项目发起人把旧项目交给 AI 整理。不到半小时，方向就变成了下面这几句：</p>
+      <blockquote>「我们想要纯视觉方案」<cite>11-04 19:18</cite></blockquote>
+      <blockquote>「而且不用拍照 就冰箱开门出发关键帧截去」<cite>11-04 19:20</cite></blockquote>
+      <blockquote>「手里的东西还是得追」<cite>11-04 19:24</cite></blockquote>
+      <p>这几句把问题换了一个问法。不去数冰箱里现在有什么，只记每一次进去了什么、出来了什么；相机也不用一直看，开门的时候才看。</p>
+      <p>决策日志把这几条都记在项目发起人名下，依据一栏写的是"你关心'进了什么'"，也写明了没有和"拍货架"的做法比过。</p>
+      <p class="next"><span>留下的问题</span>手里的东西，用什么来认？怎么才算它进去了？</p>
+    </article>
+
+    <article class="step" id="line" data-slot="line">
+      <h3>第一个做法：小模型认东西，过线算一次</h3>
+      <p class="when">11-04 → 11-06</p>
+      <p>用什么认，项目发起人当时的想法是：</p>
+      <blockquote>「不用 就yolo+jetsonnano跑一个小模型就行」<cite>11-04 19:20</cite></blockquote>
+      <p>几分钟以后又说了一句。这一句后面还会回来：</p>
+      <blockquote>「那就先在mac上跑通了，调用大模型api也行 怎么能快速demo」<cite>11-04 19:25</cite></blockquote>
+      <p>怎么才算进去了，做法是 AI 提的：检测模型把东西框出来，追踪器跟着框走，画面上画一条线，框过了线就记一次。这是数人流的成熟做法。AI 后来在决策日志里写，它"是我第一反应，没有和替代方案（手部跟踪 + 大模型）并行试过"。</p>
+      <p>11-06 在桌面上试：一个透明的冷饮杯在镜头前过线约 9 次，9 次都记到了，方向也对（杯子被认成了 wine glass）。看起来这条路走得通，于是定了三步走：</p>
+      <blockquote>「第一步是mac摄像头 第二部是无限摄像头实景但是系统在mac跑 第三部是完全独立硬件」<cite>11-06 16:28</cite></blockquote>
+      <p class="next"><span>留下的问题</span>9 次都记到了，就能说这个做法是对的吗？</p>
+    </article>
+
+    <article class="step" id="doubt" data-slot="doubt">
+      <h3>这个做法对不对，不能只听 AI 的</h3>
+      <p class="when">11-06 晚 → 11-07</p>
+      <p>桌面上跑通的当晚，项目发起人没有让 AI 接着往下做，而是让它停下来：</p>
+      <blockquote>「所以，我想你先全面的回顾之前的内容，整理我的意向，你的分析和推测，刚刚做的一切。目前我们推进的进度，以及是否合理合适，方向是否正确。……你认为目前我做的对不对……」<cite>11-06 21:27</cite></blockquote>
+      <p>第二天早上，怀疑落到了 AI 自己身上：</p>
+      <blockquote>「首先，就是我不太确定你设计和构思时是否有足够的中立性，不被之前的影响，等。……」<cite>11-07 09:47</cite></blockquote>
+      <p>Claude 的办法是换一个 AI 来看：另开一个没有任何对话上下文的 AI，只给它目标和 7 个文件，让它挑错。</p>
+      <p>它挑出来的最要紧的一条是，现有的验收"只测'系统报出来的'，不测'实际发生的'"。到那时为止的测试，都是拿一样检测模型本来就认识的东西在镜头前比划，数它记到几次；真实家庭里它漏掉的，不会出现在任何记录里。它还提醒，一个人加一个 AI 助手尤其要当心这一点，因为 AI 能不停地产出通过的测试。</p>
+      <p>它自己给的设计是另一条路：不让检测模型把关，只看门口有没有"手拿着东西穿过"，每次取几张关键帧，关门以后交给大模型去认。</p>
+      <p>从这里长出两个后来一直在用的想法。一是"真值"：实际发生了什么，由人当场记下来，再拿系统的输出去对。二是先量，再设计：先把相机装上真冰箱，录真实的开关门，再决定怎么做。</p>
+      <p>同一天，项目发起人还定了做到什么程度：</p>
+      <blockquote>「……然后我个人认为是要把这个project的难点尽量做好，其实不用做的很全面/很完整，你觉得呢，因为我时间也不是很充足……」<cite>11-07 15:22</cite></blockquote>
+      <p class="next"><span>留下的问题</span>那就上真冰箱量一次。量出来会是什么样？</p>
+    </article>
+
+    <article class="step" id="measure" data-slot="measure">
+      <h3>上真冰箱量一次</h3>
+      <p class="when">11-07 晚</p>
+      <p>相机接在电脑上，放在厨房对面的台面上，正对冰箱。录了 16 次真实的开关门：3 次什么都不拿，13 次有东西。每一次都由项目发起人当场记下放了什么、拿了什么，这份人记的答案叫"真值"。那天晚上，项目发起人问过它是什么：</p>
+      <blockquote>「首先，真值是什么。另外，我填写放入什么和放出什么的意义是？」<cite>11-07 20:14</cite></blockquote>
+      <p>量出来四个数，每一个都推翻了一个"以为"：</p>
+      <ul class="plain">
+        <li>以为冰箱灯一亮、画面变亮，就知道开门了。试了 2 次，2 次都失败：相机会自己把亮度调回去。</li>
+        <li>以为没拿东西就不会有动作。3 次空开门，3 次都被当成有动作。</li>
+        <li>以为检测模型认得出东西。按名字去对，27 项里只对上 2 项：家里冰箱进出的东西，大多不在它认识的 80 类里。</li>
+        <li>以为手记的答案不会错。13 次里有 3 次事后要改。</li>
+      </ul>
+      <p>还有一样不是数出来的，是项目发起人自己看出来的：</p>
+      <blockquote>「因为我大部分时间把冰箱挡住了，而且我放入和拿出东西也是背对着的」<cite>11-08 11:11</cite></blockquote>
+      <p class="next"><span>留下的问题</span>人一站到冰箱前，就把相机挡住了。那相机该从哪里看？</p>
+    </article>
+
+    <article class="step" id="above" data-slot="above">
+      <h3>换个地方看：门洞上方，只看手</h3>
+      <p class="when">11-08 上午</p>
+      <p>第二天上午，项目发起人和老师讨论以后带回来的想法：</p>
+      <blockquote>「……首先我们认为这个摄像头可以不固定在冰箱开门斜对面，而是可以尝试固定在冰箱门开的那个部分的上面，每次开门触发摄像头进行采集。然后因为不拍冰箱，所以主要是完全采集拿进去，拿出去的内容，例如方向以及手上的东西。……」<cite>11-08 11:11</cite></blockquote>
+      <p>从上面往下看，人的背挡不住了；要看的也正好是 11-04 说的"手里的东西"。</p>
+      <p>跟着变的有两件事。相机不拍冰箱里面，库存的起点就没法靠看，得由人先录一遍，之后靠每一次的进出来加减。还有前一晚的录像：</p>
+      <blockquote>「……所以昨天我在家里做的内容基本上就没啥用了，你可以衡量/考虑还有什么用。……」<cite>11-08 11:11</cite></blockquote>
+      <p>AI 的回答写在实验记录里：那一晚的数据是改位置的依据，有数字，不是凭感觉改的；它也是以后的对照组。</p>
+      <p>AI 按这个方向重写了设计。里面有一张表，后来变得很要紧：伸进去的时候手里有东西、出来的时候空手，是放入；空手进去、拿着东西出来，是拿出；进出都空手，不记。认名字交给大模型，再配一张家里常见东西的名单。</p>
+      <p>但接下来动手做的不是这张表。当天和老师列的 7 步计划，第一步用的是已经能跑的那一条：检测模型加追踪加过线计数，电脑上每秒约 30 帧。表里的做法，决策日志里记的是"留作对照"。这个对照后来一直没有做。</p>
+      <p class="small">门洞上方这个位置也不是第一次出现：11-04 的计划里写过"冰箱顶部前沿朝下看门口"。11-07 那晚放在正面，只是因为那是当晚电脑放得下的地方。</p>
+      <p class="next"><span>留下的问题</span>相机搬到上面以后，"过线算一次"这条规则还成立吗？</p>
+    </article>
+
+    <article class="step" id="inside" data-slot="inside">
+      <h3>看不到里面，规则还成立吗</h3>
+      <p class="when">11-08 下午</p>
+      <p>先在桌面上把规则本身量了一遍。3 段录像，11 次真实的进出，"过线算一次"多记了 12 次、漏记了 5 次：东西在线上晃一下、拿出来又马上放回去，都被记了。AI 问这些算不算，给了两个选项：</p>
+      <blockquote>「不算，只看最后」<cite>11-08 13:03（点选）</cite></blockquote>
+      <p>规则改成只看东西最后停在哪一边以后，多记 0 次、漏记 2 次。这是在同一批录像上边改边测出来的数，会偏乐观。</p>
+      <p>接着是项目发起人自己想到的一个问题：</p>
+      <blockquote>「所以我想知道，目前的逻辑是什么，因为我视频里是把物品拿进来并放在桌上，那如果是真实冰箱的那边，就不一定能拍到冰箱里面？只能有进出，且只能通过进出的逻辑来判断。那这么来看的话，目前的逻辑合理吗？你需要做什么改动吗」<cite>11-08 13:21</cite></blockquote>
+      <p>AI 的办法是把录像的里侧涂黑，模拟"看不到里面"。只留 5% 的时候，新规则一次都没记对。于是又加了一套专门给门洞上方用的规则。</p>
+      <p>下午老师建议换更好的追踪器试试。AI 把四种现成的追踪器都换上去跑了一遍，结果没有变好；倒是顺带查出实验记录里一条结论写错了：那个"太快、没检测到"的苹果，其实每一帧都检测到了，是追踪没把它们连起来。</p>
+      <p>回头看，这一天做的三件事，改规则、加规则、换追踪器，修的都是同一条线。AI 在决策日志里也认了："过线计数：是我最先写的，之后一直在修补它，没有认真做替代方案的对照实验。"</p>
+      <p class="next"><span>留下的问题</span>这些数都是桌面上的。门洞上方到底行不行，还没有一个数。在那之前：怎么量才算数？</p>
+    </article>
+
+    <article class="step" id="check" data-slot="check">
+      <h3>什么才算"测过"</h3>
+      <p class="when">11-08 傍晚 → 11-15</p>
+      <p>11-08 傍晚，程序上了板子（用的是手头已有的一块板子，不是 11-04 说的 Jetson Nano）。板子自己的处理器跑检测只有每秒 2–3 帧；老师改用板子自带的加速芯片、换了一个检测模型以后，到了约 14 帧。那一次"部署并验证"，验证的是程序能跑、日志不报错；开了 5 次门，没有记真值，准不准没有量。</p>
+      <p>之后几天，项目发起人想的是把软件做扎实：</p>
+      <blockquote>「……硬件我也许没法做到很高的水平，但软件应该可以用用心……」<cite>11-15 15:47</cite></blockquote>
+      <p>AI 回头把代码和原始数据重读了一遍，做了三件和"量"有关的事。一是把文档里"说得比数据更强"的地方列出来，一共 14 处。二是做了逐个动作打分的工具：只比总数的话，多记一次和漏记一次会互相抵消，看起来像是对的。三是为上冰箱选位置写了步骤，并且在录之前就写定怎么选。</p>
+      <p>到这里，"测过"的意思比 11-06 严了很多：要对着人记的真值，要一个动作一个动作地对，办法要在看到数据之前定好。</p>
+      <p>不过门洞上方的录像一直没有录，日程往后推了。</p>
+      <p class="next"><span>留下的问题</span>还是那一个：门洞上方的第一个数。</p>
+    </article>
+
+    <article class="step" id="posd" data-slot="posd">
+      <h3>新位置的第一个数：8 个里数对 0–1 个</h3>
+      <p class="when">11-21</p>
+      <blockquote>「我觉得现在什么都可以停 我就跑摄像头在mac的实地测试」<cite>11-21 15:48</cite></blockquote>
+      <p>相机第一次装到了冰箱门口上方，按动作清单录了一段：10 个动作，8 个手里有东西，2 个空开门。</p>
+      <p>出来两个数。开门检测：10 次开门，10 次都醒了，没有多醒。过线计数：8 个有东西的动作，只数对 0–1 个。</p>
+      <p>项目发起人接着问的几句，就是下一段的起点：</p>
+      <blockquote>「你整理目前的工作进度 你看看是优化算法的问题 还是硬件方面得优化？」<cite>11-21 17:03</cite></blockquote>
+      <blockquote>「我觉得两个相机是不是就稳了」<cite>11-21 17:14</cite></blockquote>
+      <p>当晚 AI 在同一段录像上换线的位置、换规则、换检测设置，一共试了 48 种。有的设置下数字会好看一些，比如线挪高一点、换一套规则，里面搁板的 5 个动作能数对 4 个；但这 4 个里，类别也对得上的是 0 个。而且这些都是看着这段录像事后试的，哪一格都不能当准确率。</p>
+      <p class="next"><span>留下的问题</span>是线画得不对，是一台相机不够，还是"数过线"这个看法本身不对？</p>
+    </article>
+
+    <article class="step" id="cabinet" data-slot="cabinet">
+      <h3>是线画错了，还是看法错了：想到智能售货柜</h3>
+      <p class="when">11-21 夜 → 11-22 上午</p>
+      <p>这个问题，项目发起人没有只问 Claude，还带去了另一个 AI 工具。在那边是怎么问的，这里没有原话；有的是那个工具写回来的东西，和项目发起人后来说的这一句：</p>
+      <blockquote>「比如我想到了 这个智能售货柜 这些思维的进展怎么都没有记录」<cite>11-22 12:12，说的是这一页的上一版漏记了这一步</cite></blockquote>
+      <p>按留下来的东西排，是这样的：</p>
+      <ul class="plain">
+        <li>11-22 00:00 存下两份研究报告，题目是《计数线、镜头机位与双镜头配置研究》和《真实家庭冰箱中的"放入／拿出、身份、数量"下一步路线》。从题目看，接的还是前一晚的问题：线、相机的位置、要不要两台相机。两份报告举的外面的例子里，都有一项双相机智能售货柜的研究。</li>
+        <li>09:03 项目发起人贴给 Claude 一段那个工具的回答。回答的是：可以，就用原来那段录像，不用重拍、不用挪相机，做一次"手持物品前后状态"的实验；先让人眼判断，再让视觉模型判同样的画面。</li>
+        <li>09:24 存下第三份报告，题目是《面向 fridge-vision 的纯视觉自动售卖柜算法研究：从"过线计数"转向"手—物体交互 + 时序状态"》。报告里提到一个判法，说它是项目发起人"刚提出的"：进去时手里有没有，出来时手里有没有。</li>
+        <li>11:26 贴来的第四份里，把"大模型看取放视频"叫作项目发起人提出的路线；也说"看手里有什么"这条线索，公开的售货柜研究用的是同一条思路。</li>
+      </ul>
+      <p>连起来看，这一步的想法是：智能售货柜要解决的是同一个问题，人从柜子里拿走了什么；它们靠的大多不是数线，而是看手和手里的东西前后怎么变。那冰箱也可以不数线，只看手：进去时手里有没有，出来时手里有没有。</p>
+      <p class="small">上面这一句是 Claude 照那几样东西连起来的读法。当时具体是怎么想到售货柜的，等本人在下面的备注里补。</p>
+      <p>这一步里 AI 工具的用法也变了：不是让 AI 接着改程序，而是拿同一个问题去问另一个 AI，让它去查别人是怎么做的。</p>
+      <p>回头看，有两处值得记下。</p>
+      <p>售货柜不是这时候才第一次出现。11-13 AI 查资料时就列过两条售货柜的专利，其中一条正是按手离开的方向来判断拿走还是放回；11-21 下午又搜到两个售货柜的开源项目。它们都被放进了报告提纲的"相关工作"表里，没有被拿来回头问自己的做法。把售货柜当成"同一个问题别人是怎么解的"来问的，是项目发起人。</p>
+      <p>看手的判法也不是新的。它就是 11-08 设计里的那张表；再往前，是 11-07 那个没有上下文的 AI 的建议；再往前，是 11-04 那句「调用大模型api也行」。写下那张表的是 AI，建议把它"留作对照"的也是 AI；可是这个对照，两个星期里没有做。</p>
+      <p class="next"><span>留下的问题</span>这个判法，在那段录像上到底行不行？</p>
+    </article>
+
+    <article class="step" id="hand" data-slot="hand">
+      <h3>换一种判法：看手伸进去之前和出来以后拿着什么</h3>
+      <p class="when">11-22 上午</p>
+      <p>09:03 项目发起人把这个判法带回来，Claude 当场在那段录像上试。</p>
+      <p>先查了那唯一"数对"的 1 个。从录像重新检测一遍，它没有了，成了 0/8；逐帧去看，当时过线的不是手里的东西，是关门时门上格子里的一个罐子。所以 0–1/8 其实就是 0：那条线没有数到过任何一样手里的东西。</p>
+      <p>然后换判法。每个动作每半秒取一帧，拼成几张图，交给没有任何上下文、也没看过答案的 AI，只问一件事：手伸进去之前拿着什么，出来以后拿着什么。答案再用原来那个逐个动作打分的程序去对。判的是 Claude 的三个大小不同的模型，下面叫最大的、中等的、最小的。</p>
+      <p>结果：最大的和中等的模型，8 个动作全判对，放在门上格子里的 3 个也对，2 次空开门都没有误记。最小的模型一次看 61 张图，把几段记混了，对 5 个。</p>
+      <p>同一台相机、同一段画面，只换了判法。所以前一晚那个问题有了第一个答案：不是这个位置拍不到，是"数过线"量不到。</p>
+      <blockquote>「需要加多机位么」<cite>11-22 09:47</cite></blockquote>
+      <p>Claude 的回答是先不加。这一条还没有最后定。</p>
+      <p class="next"><span>留下的问题</span>放入、拿出判对了，是什么东西也认得出吗？</p>
+    </article>
+
+    <article class="step" id="name" data-slot="name">
+      <h3>判对了进出，还要认出是哪一样</h3>
+      <p class="when">11-22 上午</p>
+      <blockquote>「物品识别也过关了对吧」<cite>11-22 09:30 前后</cite></blockquote>
+      <p>没有。是瓶子、苹果还是碗，认得出：有类别可对的 7 个动作，最大的和中等的模型 7 个都对。具体是哪种饮料就不行：同一瓶乌龙茶出现 4 次，中等的模型只叫对 1 次。把画面放大看，标签上的字读不出来。</p>
+      <blockquote>「是不是应该提前录入常见商品？」<cite>11-22 09:38</cite></blockquote>
+      <p>当场试了一下：把那瓶乌龙茶第一次出现时的几帧，当作登记时拍的参考图，一起给中等的模型。它另外 3 次出现全认出来了，别的 4 样东西没有被认错。只登记了这一样东西试过。</p>
+      <p>这一步把"认东西"的意思也改了。不是让模型认遍所有的商品，是先告诉它这个家里有哪几样，再让它认是哪一样。这和 11-08 设计里那张"家里常见东西的名单"接上了；售货柜那边的做法里，也有商品目录和参考图这一项。</p>
+      <p class="next"><span>留下的问题</span>每次开门都让大模型看一遍，要花多少钱？</p>
+    </article>
+
+    <article class="step" id="cost" data-slot="cost">
+      <h3>判得对，还要用得起</h3>
+      <p class="when">11-22 上午</p>
+      <blockquote>「也要考虑识别成本啊」<cite>11-22 09:49</cite></blockquote>
+      <p>按每天开 40 次门估算（40 次是假设的）：最大的模型每月约 139 美元，中等的约 35 美元，最小的约 2 美元。</p>
+      <blockquote>「这个成本肯定太高了啊」<cite>11-22 10:02</cite></blockquote>
+      <blockquote>「Haiku 5.5 的成本还可以」<cite>11-22 10:03，Haiku 5.5 就是最小的那个模型</cite></blockquote>
+      <p>于是问题从"能不能判对"变成了"用得起的那个模型能不能判对"。最小的模型一次看太多图会记混，改成每个动作单独问，8 个对 6 个。照着它错的那两个改了一版问法以后，8 个全对。</p>
+      <p><span class="note">但这个 8/8 不算数。</span>问法是照着这段录像上的错改的，等于看了答案再改卷子。11-08 改计数规则时已经碰到过一次同样的事：在同一批录像上边改边测，数会偏乐观。所以在录新录像之前，先把怎么取画面、怎么问、怎么打分都写定；新录像只打一次分。</p>
+      <p class="next"><span>留下的问题</span>没见过的新录像上，它还判得对吗？录之前，还有一件事没有定：相机。</p>
+    </article>
+
+    <article class="step" id="twocam" data-slot="twocam">
+      <h3>要不要第二台相机：商用的都是双摄</h3>
+      <p class="when">11-22 下午</p>
+      <p>录新录像之前，项目发起人又问了一遍相机的事：</p>
+      <blockquote>「现在需要双机位么」<cite>11-22 14:01</cite></blockquote>
+      <p>Claude 的回答还是先不加：现有的错不是拍不到造成的。项目发起人不同意：</p>
+      <blockquote>「可是那些商用方案不是都是双摄像头么」<cite>11-22 14:03</cite></blockquote>
+      <p>这句话让 Claude 改了说法。查到的售货柜方案确实基本都是两台相机，这说明在更难的动作上，一台很可能不够。但它们用双摄的理由，有的这里也有（手和身体会挡住东西），有的这里没有（它们每一单都是钱，没有人在场纠正）。所以买不买先不定，换一个问法：这次录的时候顺手多架一路，让数据来回答"另一个视角能补多少"。</p>
+      <p>项目发起人直接动手了：</p>
+      <blockquote>「我现在已经插了两个摄像头 你看看赶紧录吧」<cite>11-22 14:09</cite></blockquote>
+      <blockquote>「我还可以拿手机做第三个摄像头」<cite>11-22 14:11</cite></blockquote>
+      <p>于是这一次是三路一起录：冰箱里上方那台，冰箱外面台面上的一台，再加一部手机。开录之前先补写了一条：多出来的两路只用来看另一个视角能补多少，不拿来改原来那套打分。</p>
+      <p class="next"><span>留下的问题</span>三路一起，照写定的做法录一次、测一次，结果怎么样？</p>
+    </article>
+
+    <article class="step" id="three" data-slot="three">
+      <h3>照写定的做法测一次：没有测成，只录到三个动作</h3>
+      <p class="when">11-22 下午</p>
+      <p>这一次没有照计划做成。</p>
+      <p>先是几处 AI 没有准备好：给的第一条命令跑在一个没有相机权限的窗口里，三台相机都没打开；有一段录的是空的。然后是登记那一段：冰箱里那台相机录到第 83 秒就没有画面了，原因没有查清；AI 当时没有盯着，没能当场说。另外两台录满了 7 分半。</p>
+      <p>项目发起人说先这样，不做了。几分钟以后：</p>
+      <blockquote>「要不再来一次？」<cite>11-22 15:30</cite></blockquote>
+      <blockquote>「我现在只有十分钟了」<cite>11-22 15:36</cite></blockquote>
+      <blockquote>「我们就录三个吧」<cite>11-22 15:38</cite></blockquote>
+      <p>冰箱里那台还是没有画面，来不及重新插线。最后用的是冰箱外面的两台相机，录了 3 个动作，电脑一步一步念出该做什么。</p>
+      <p>这 3 个动作交给没看过答案的最小的模型去判，判法是看录像之前写下来的。结果：只给手机那一路，判对 2 个；只给台面那一路，判对 2 个；两路一起给，3 个都对。</p>
+      <p>比这几个数更值得记的是第 1 个动作。电脑念的是"把乌龙茶放进里面的搁板"，实际做的是从门上的格子里拿出一瓶，放进里面的搁板：东西在冰箱里挪了个地方，总数没有变。答案不能照清单填，是 AI 逐帧核对以后才定下来的。11-07 那句"只测系统报出来的，不测实际发生的"，在这里又碰到了一次，这回是清单上写的和实际做的不一样。</p>
+      <p class="small">这 3 个动作不是写定的那次测试：相机不是原来那台，没有登记段，只有 3 个动作、一个人。它说明不了准确率，也回答不了"另一个视角能补多少"，因为冰箱里那台这次没有数据。</p>
+      <p class="next"><span>留下的问题</span>不再录新的，手头的录像还能再说明些什么？</p>
+    </article>
+
+    <article class="step" id="reuse" data-slot="reuse">
+      <h3>先不测了：手头的录像还能说明什么</h3>
+      <p class="when">11-23</p>
+      <blockquote>「可以利用现有数据分析吗 先不测了」<cite>11-23 10:52</cite></blockquote>
+      <p>可以。清点手头的录像，还有 7 次开关门没有被任何评判看过：11-21 正式录之前的试录里 2 次，11-22 登记那一段里 5 次。它们不是照清单做的，是录的过程中自然发生的。</p>
+      <p>还是原来的办法：先写定怎么判，交给没看过答案的最小的模型，最后由 AI 逐帧核对每一次实际做了什么。核对出来，7 次里有 3 次是单纯的拿出或放入；3 次是"拿出来又放回去"，那是做登记的时候，把东西从冰箱里拿出来举给相机看，再放回去；还有 1 次定不了（见这一节末尾的更正）。</p>
+      <p>结果分成了很清楚的两半：</p>
+      <ul class="plain">
+        <li>单纯拿出或放入的 3 次，冰箱里那台相机 3 次都判对了，放在哪、是哪一类也对。这是提示词没见过的录像。</li>
+        <li>拿出来又放回去的 3 次，用冰箱里那台和手机来判，5 次判断全错：多数是只看到了拿出，记成少了一件。换中等的模型再判，4 次里也只对 1 次。放回的那一下只有一秒左右，人又挡着，半秒一帧的画面里基本没拍到。</li>
+      </ul>
+      <p>关于相机，这批录像也说了话。只用外面的手机那一路，5 次只对 1 次：人背对着它，把冰箱挡住了。冰箱里那台加上手机，也没有比只用冰箱里那台更好。项目发起人接着问：</p>
+      <blockquote>「三路一起呢？」<cite>11-23 12:06</cite></blockquote>
+      <p>台面上那一台，之前一次都没有给评判看过，于是补判了一轮。三台都拍到的 3 次：三路一起对 2 次，和只用冰箱里那台一样。错的还是"拿出来又放回去"的那一次，不过这回它看到了"拿出一瓶，后来又有一瓶回到门上"，只是不敢断定是同一瓶。另外两次只有外面两路拍到，都是拿出又放回：两路一起，一次判对了（单看哪一路都错），一次还是判断不了。</p>
+      <p class="small">补判的这一轮，是在 AI 已经核对过实际做了什么以后才加的，不是事先写定的，只能当补充。说明文字用的是前一天写好的那一段，没有改。</p>
+      <p>这一步让三件事清楚了。单纯的拿和放，冰箱里上方那一台相机就够，多加几路没有多出什么。同一次开门里拿出来又放回去，是现在这个判法的一个毛病：多给几路画面有时能判对，不稳。还有一件有点意外：登记这个动作本身，就是最难判的动作。</p>
+      <p class="small">这 7 次的"实际做了什么"是 AI 看画面定的，没有第二个人核对；一共只有 7 次，东西就是瓶子、苹果、盒子这几样。</p>
+      <p class="small"><strong>11-24 更正。</strong>这一节原来写的是"7 次里有 4 次是单纯的拿出或放入，4 次都判对了"。其中一次是 AI 核对错的。那一次，人从门上拿出一瓶以后，另一只手里又多了一袋东西，两样一起带走了。AI 当时把那一袋认成了口罩，以为不是冰箱里的，就没有算。11-24 把那几秒逐帧重看：那是一袋软包装，是手伸到画面外面拿回来的；画面外面是不是冰箱门上的一格，这台相机看不出来。所以这一次是少了一件还是两件，定不了，不能算判对。这一页里用到这个数的地方都改了：4 次改成 3 次。</p>
+      <p class="next"><span>留下的问题</span>到这里，方案能不能算定了？</p>
+    </article>
+
+
+
+    <article class="step" id="done" data-slot="done">
+      <h3>什么叫做成了</h3>
+      <p class="when">11-07 → 11-23</p>
+      <p>这个问题没有单独讨论过。但项目发起人前后说过的几句话放在一起，能看出它也在变。</p>
+      <blockquote>「……然后我个人认为是要把这个project的难点尽量做好，其实不用做的很全面/很完整……」<cite>11-07 15:22</cite></blockquote>
+      <blockquote>「明天必须交」<cite>11-21 15:47（点选）</cite></blockquote>
+      <blockquote>「不是推送成功是项目成功」<cite>11-22 09:03，Claude 把"怎么才能成功"听成了"改动怎么推送上去"</cite></blockquote>
+      <blockquote>「其实没有一个严格的交付日期 事自己给自己设置的交付日期」<cite>11-22 11:38</cite></blockquote>
+      <blockquote>「……现在你觉得是不是ok了，方案可以基本确定了吗 还是需要继续尝试测试」<cite>11-23 10:41</cite></blockquote>
+      <p>先是不求做全，把难点做好；再是分清"东西交上去了"和"它真的能判对"；然后，连日期也是自己给自己定的。到 11-23，问的是方案能不能定下来、还要不要接着测。Claude 对这个问题的回答，在最后一节"现在到哪了"里。</p>
+    </article>
+
+  </div>
+</section>
+
+<section id="look-back" data-slot="look-back">
+  <h2>回头看：想法是沿着哪几条线长出来的</h2>
+  <p class="intro">这一段是 Claude 回头读记录整理出来的读法，不是项目发起人的话。</p>
+  <ul class="plain">
+    <li><strong>看什么。</strong>冰箱里有什么 → 门口进出了什么 → 手伸进去之前和出来以后拿着什么。每一步都把要看的东西缩小了一圈。</li>
+    <li><strong>用什么认。</strong>认 80 类的小模型 → 看画面的大模型 → 先登记自家的东西，再让模型认是哪一样。</li>
+    <li><strong>怎么才算测过。</strong>系统记到几次 → 对着人记的真值 → 一个动作一个动作地对 → 做法先写定，再在没见过的录像上只打一次分。</li>
+    <li><strong>值不值。</strong>能不能做到 → 用得起的那一档能不能做到。</li>
+    <li><strong>相机放哪、放几台。</strong>正对着冰箱 → 冰箱里上方朝下看 → 外面再加一两个角度试了试 → 现有的数据里，冰箱里上方那一台就够记单纯的拿和放。</li>
+  </ul>
+  <p>还有一件事从头到尾都在：最后管用的那个想法，让大模型看手里的东西，在 11-04、11-07、11-08 各出现过一次，每一次都写下来了，每一次都没有去试。直到 11-21 量出 0–1/8，项目发起人从售货柜那里又绕回到它，它才第一次被拿到录像上去试。</p>
+</section>
+
+<section id="ai-how" data-slot="ai-how">
+  <h2>借助 AI 工具，是怎么一步步展开的</h2>
+  <p class="intro">上面每一步里都有 AI，但用法不一样。按出现的先后：</p>
+  <ul class="plain">
+    <li><strong>让它动手</strong>（11-04 起）。除了老师写的部分，仓库里的代码和文档文字大部分是 AI 写的。</li>
+    <li><strong>让它停下来复盘</strong>（11-06）。桌面上刚跑通，就让它把做过的事、它的分析和推测、方向对不对，从头回顾一遍。</li>
+    <li><strong>用一个 AI 去查另一个 AI</strong>（11-07）。请一个没有任何上下文的 AI 给方案挑错。</li>
+    <li><strong>让它造一个量的办法</strong>（11-08）。把录像的里侧涂黑，模拟看不到冰箱里面；把四种追踪器换上去并排比。</li>
+    <li><strong>追问它在干什么</strong>（11-08）。
+      <blockquote>「现在25分钟了，咋这么久？你在做什么？刚刚具体做到了什么？」<cite>11-08 15:38</cite></blockquote></li>
+    <li><strong>让它查自己说得太满的地方</strong>（11-13 → 11-15）。文档里找出 14 处"说得比数据更强"的地方。</li>
+    <li><strong>换一个 AI 工具问同一个问题，再把答案带回来对</strong>（11-21 夜 → 11-22）。另一个工具给了研究报告和"用原来的录像试"的建议；Claude 核对了报告里说到的代码和开源项目，并在录像上把那个判法试了出来。</li>
+    <li><strong>让没看过答案的 AI 当评判</strong>（11-22）。事后从运行记录里查过，它们只打开了给它们的那些图。</li>
+    <li><strong>让它替人念、替人盯着</strong>（11-22 下午）。录的时候电脑一步一步念出该做什么；哪台相机断了，自动接着录并出声提醒。这两样是出了岔子以后才加上的。</li>
+  </ul>
+
+  <h3 class="sub">这几件是人先提出来的</h3>
+  <ul class="plain">
+    <li>不用拍照，开门才看，追手里的东西（11-04）。</li>
+    <li>AI 的设计可能不够中立（11-07）。</li>
+    <li>不用什么都做全，把难点做好（11-07）。</li>
+    <li>相机放到门洞上方，只看手和手里的东西（11-08，和老师）。</li>
+    <li>真冰箱从上面拍，看不到里面，那现在的规则还合理吗（11-08）。</li>
+    <li>是算法的问题，还是硬件的问题（11-21）。</li>
+    <li>智能售货柜；进去时手里有没有，出来时手里有没有（11-21 夜 → 11-22）。</li>
+    <li>是不是应该提前录入常见商品（11-22）。</li>
+    <li>识别要花多少钱（11-22）。</li>
+    <li>商用的方案都是双摄，那这里要不要（11-22）。</li>
+    <li>时间不够，就录三个（11-22）。</li>
+    <li>先不测了，用现有的数据分析；三路一起呢（11-23）。</li>
+  </ul>
+
+  <h3 class="sub">AI 出过的错</h3>
+  <ul class="plain">
+    <li>第一个做法是它的第一反应，没有和别的做法比过。</li>
+    <li>"看手"的那张表是它自己写的，它也建议过留作对照；可是两个星期里它修的一直是数过线，这个对照没有做。</li>
+    <li>实验记录里有一条结论写错了："太快、没检测到"，其实是每一帧都检测到了，追踪没把它们连起来。</li>
+    <li>它写的文档里，有 14 处说得比数据更强。</li>
+    <li>11-22 把"这个情况怎么才能成功"听成了"改动怎么推送"，被纠正了三次。</li>
+    <li>11-22 下午录像：它给的第一条命令跑在没有相机权限的窗口里；冰箱里那台相机断了，它没有盯着，没能当场说。项目发起人为此白跑了几趟。</li>
+    <li>这一页它先写成了一个故事；改成思考记录以后，又漏掉了项目发起人自己的想法（比如售货柜），还把那个判法的来源写成了"没有说"。现在这一版是这样来的：
+      <blockquote>「我觉得不用故事性这么强 主要是记录自己的思考」<cite>11-22 11:36</cite></blockquote>
+      <blockquote>「不单是这一个问题 你要复盘整个项目 让这个项目的思想自然生长出来 要完整流畅自然」<cite>11-22 12:15</cite></blockquote></li>
+  </ul>
+</section>
+
+<section id="ai-think" data-slot="ai-think">
+  <h2>对 AI 工具的思考</h2>
+  <blockquote>「也在思考ai工具的意义」<cite>11-22 11:37</cite></blockquote>
+  <p class="small">下面这一段是 Claude（AI）写的草稿。项目发起人的原话是「你帮我写」（11-22 11:50）。它只根据上面的记录来写；哪些是项目发起人自己的看法，要等本人来改、来补。</p>
+
+  <p><strong>AI 把"试一下"变得很便宜。</strong>一个想法，当天就能变成能跑的程序和能看的数。11-22 一个上午，换判法、认名字、算成本三件事都试了。想法变得快，是因为每个想法都能很快被量一下。</p>
+
+  <p><strong>便宜的另一面，是容易顺着第一个能跑的做法一直修下去。</strong>数过线是 AI 的第一反应，桌面上一跑通，后面两个星期修的都是它。</p>
+
+  <p><strong>AI 写得出对的想法，不等于它会去试。</strong>"看手"的那张表，11-08 就在它写的设计里。把它重新提出来的不是 AI，是带着"售货柜是怎么做的"绕回来的人。</p>
+
+  <p><strong>AI 说得通，不等于它是对的。</strong>这个项目里真正管用的，都是不靠它自己说了算的东西：真冰箱上的测量、人记的真值、没看过答案的另一个 AI、录之前就写定的打分办法。</p>
+
+  <p><strong>换一个 AI 问同一个问题，是有用的。</strong>11-07 那个没有上下文的 AI，和 11-22 的另一个工具，都把原来那个 AI 顺不出来的东西带了进来。带回来的答案也要再核对一遍，不是谁说了就算。</p>
+
+  <p><strong>该问什么，多数时候是人先想到的。</strong>设计会不会不中立，从上面拍看不到里面怎么办，是算法还是硬件，售货柜是怎么做的，识别要花多少钱。AI 把问题接过去做得很快，但这些问题不是它先提的。</p>
+
+  <p><strong>纠正 AI，也是用 AI 的一部分。</strong>它会把"怎么才能成功"听成"怎么推送"，会把一页记录写成故事，会漏掉人自己的想法。说一句"不是"，它就改；不说，它就照自己以为的往下做。</p>
+
+  <p><strong>AI 省不了要人亲手做的那几分钟。</strong>程序它一会儿就能改好，可是站到冰箱前面把动作做一遍，只能人来。11-22 下午白跑的那几趟，都是因为它没有先把自己这边试通，就请人动手了。</p>
+
+  <p><strong>所以它的意义，可能在这里：</strong>AI 缩短的是从"以为"到"测到"的时间。问什么、信不信、往哪改，还是人定的。</p>
+
+  <p><strong>还有一个 AI 回答不了的问题：</strong>代码和文档大部分是它写的，那做项目的人学到了什么，怎么确认自己真的懂了。这一条只能本人来写。</p>
+  <p class="empty">（留给项目发起人）</p>
+</section>
+
+<section id="now" data-slot="now">
+  <h2>现在到哪了</h2>
+  <ul class="figures">
+    <li><span class="num">0–1/8 → 8/8</span><span class="cap">同一段录像，换了判法以后，8 个有物品的动作判对的个数</span></li>
+    <li><span class="num">3/3</span><span class="cap">没见过的录像上，单纯拿出或放入的 3 次：冰箱里那台相机加最小的模型，全判对（11-24 更正：原来写的是 4/4，其中 1 次后来发现定不了）</span></li>
+    <li><span class="num">0/5</span><span class="cap">"拿出来又放回去"的 3 次：用冰箱里那台和手机来判，5 次判断全错</span></li>
+    <li><span class="num">1/4 → 3/3</span><span class="cap">同一瓶乌龙茶：不给参考图 4 次叫对 1 次；给一组参考图，另外 3 次全认出</span></li>
+    <li><span class="num">约 35 → 约 2 美元</span><span class="cap">每月的识别成本：中等大小的模型，和最小的模型（估算）</span></li>
+    <li><span class="num">10/10</span><span class="cap">10 次开门，开门检测都醒了，没有多醒</span></li>
+  </ul>
+  <p class="small" style="margin-top:22px">这些数都很小：一个人，一台冰箱，加起来二十来次开门，哪一个都不能当准确率。第二、第三个数里"实际做了什么"是 AI 看画面定的；第二个数 11-24 更正过一次，原因写在"先不测了"那一节的末尾。判的是联网的 AI 模型，还不是能在板子上跑的程序。开门检测那一条，是把板子的规则放在录像上重放出来的，不是在板子上跑的。</p>
+
+  <h3 class="sub">方案定了吗</h3>
+  <blockquote>「……现在你觉得是不是ok了，方案可以基本确定了吗 还是需要继续尝试测试」<cite>11-23 10:41</cite></blockquote>
+  <p class="small">下面是 Claude 的回答，11-23 中午用现有的录像又判了一批以后改过一次。这是它的看法，定不定由项目发起人说了算。</p>
+
+  <p><strong>方向可以定了。</strong>不再数过线。开门的时候录一段；关门以后，让模型看"手伸进去之前和出来以后拿着什么"；家里常放的东西先登记，再让它认是哪一样；拿不准的不硬猜，留给人改。支持它的：同一段录像上，数过线是 0–1/8，看手是 8/8；在提示词没见过的录像上，最小的模型一共判过 10 次开门，单纯的拿和放都判对了（其中 1 次后来发现实际做了什么定不了，不算在内；11-24 更正）；查到的售货柜做法，走的也是看手和手里东西的这条路。</p>
+
+  <p><strong>现在可以定到这个程度：</strong></p>
+  <ul class="plain">
+    <li>相机：一台，放在冰箱里上方。单纯的拿和放，它 3 次都对（11-24 更正：原来写的是 4 次）；外面再加一路、两路，在这类动作上没有多出什么。它 11-22 断过一次，线和位置要固定好。</li>
+    <li>判法：最小的模型看手里东西的前后状态，用来记单纯的拿和放。每月的识别成本估算在 2 美元左右。</li>
+    <li>已知的毛病：同一次开门里拿出来又放回去，会被记成少了一件。多给几路画面有时能判对，不稳。暂时没有解法，报告里照实写；真用起来，要靠人改或者定期对一次账。</li>
+  </ul>
+
+  <p><strong>还没有证据的：</strong></p>
+  <ul class="plain">
+    <li>写定的那次测试（10 个动作，只打一次分）试过一次，没有做成。</li>
+    <li>一次拿两样、没登记过的东西、换一个人来做，都还没有测过。认出具体是哪一样，只试过一样东西。</li>
+    <li>现在判的是对话里的 AI，不是一个自己会跑的程序。判完以后怎么记进库存，还没有接上；板子上也没有跑过。</li>
+  </ul>
+
+  <p><strong>接下来不急着再录。</strong>先把"取画面、问模型、出结果"写成一个能重复运行的程序，在已有的录像上跑通。以后想再往前走，再照写定的做法完整录一次。在那之前，报告里可以照实写：方向是怎么找到的，现在有哪几个数，哪个毛病还没有解决，哪些还没有测。</p>
+</section>
+
+<footer>
+  <p>出处：仓库里的<a href="https://github.com/tct33x7/fridge-vision/blob/main/docs/STORY.md">开发故事</a>、<a href="https://github.com/tct33x7/fridge-vision/blob/main/docs/DECISIONS.md">决策日志</a>、<a href="https://github.com/tct33x7/fridge-vision/blob/main/docs/BLIND_REVIEW.md">盲审原文</a>和<a href="https://github.com/tct33x7/fridge-vision/blob/main/docs/experiments/E03_position_20261112.md">实验记录</a>。11-22 那一段的记录稍后推送到仓库。另一个 AI 工具写的几份报告只在项目发起人的电脑上，这里只引了题目。</p>
+  <p>代码：<a href="https://github.com/tct33x7/fridge-vision">github.com/tct33x7/fridge-vision</a> · 写于 2026-11-22，11-23 补了 11-22 下午的两段、用现有录像又判的一批和"方案定了吗"；11-24 更正了一个数（单纯拿放 4/4 改成 3/3）</p>
+</footer>
+
+</main>
+<script>
+(function () {
+  var MAX = 300;
+  var slots = [];
+  var slotEls = document.querySelectorAll('[data-slot]');
+  for (var i = 0; i < slotEls.length; i++) slots.push({ id: slotEls[i].getAttribute('data-slot'), el: slotEls[i] });
+
+  var keyMatch = location.hash.match(/[#&]k=([A-Za-z0-9]+)/);
+  var key = keyMatch ? keyMatch[1] : '';
+  // 点目录只是跳到那一段，不重新加载；只有地址里新带上了一串专用的字，才重新加载一次。
+  window.addEventListener('hashchange', function () {
+    var m = location.hash.match(/[#&]k=([A-Za-z0-9]+)/);
+    if (m && m[1] !== key) location.reload();
+  });
+  var notes = [];
+
+  function two(n) { return (n < 10 ? '0' : '') + n; }
+  function when(iso) {
+    var d = new Date(new Date(iso).getTime() + 8 * 3600 * 1000);
+    return d.getUTCFullYear() + '-' + two(d.getUTCMonth() + 1) + '-' + two(d.getUTCDate()) + ' ' + two(d.getUTCHours()) + ':' + two(d.getUTCMinutes());
+  }
+  function count(str) { return Array.from(str).length; }
+
+  function renderList(slot) {
+    var list = slot.list;
+    while (list.firstChild) list.removeChild(list.firstChild);
+    notes.filter(function (n) { return n.slot === slot.id; }).forEach(function (n) {
+      var item = document.createElement('div');
+      item.className = 'note-item';
+      var head = document.createElement('div');
+      head.className = 'note-head';
+      head.appendChild(document.createTextNode('备注 · ' + when(n.at)));
+      if (key) {
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'link';
+        del.textContent = '删除';
+        del.addEventListener('click', function () { remove(n.id); });
+        head.appendChild(del);
+      }
+      var body = document.createElement('div');
+      body.className = 'note-body';
+      body.textContent = n.text;
+      item.appendChild(head);
+      item.appendChild(body);
+      list.appendChild(item);
+    });
+  }
+  function renderAll() { slots.forEach(renderList); }
+
+  function remove(id) {
+    if (!window.confirm('删掉这一条备注？')) return;
+    fetch('/api/notes/' + id, { method: 'DELETE', headers: { 'x-edit-key': key } })
+      .then(function (r) {
+        if (r.ok) { notes = notes.filter(function (n) { return n.id !== id; }); renderAll(); }
+        else window.alert('没有删掉（' + r.status + '）');
+      })
+      .catch(function () { window.alert('没有删掉，网络出了问题'); });
+  }
+
+  slots.forEach(function (slot) {
+    var box = document.createElement('div');
+    box.className = 'remark';
+    var list = document.createElement('div');
+    slot.list = list;
+    var form = document.createElement('form');
+    var label = document.createElement('label');
+    label.htmlFor = 'remark-' + slot.id;
+    label.textContent = '备注';
+    var ta = document.createElement('textarea');
+    ta.id = 'remark-' + slot.id;
+    ta.rows = 2;
+    ta.maxLength = MAX;
+    ta.placeholder = '只能写文字，最多 ' + MAX + ' 个字';
+    var hp = document.createElement('input');
+    hp.type = 'text';
+    hp.name = 'website';
+    hp.className = 'hp';
+    hp.tabIndex = -1;
+    hp.autocomplete = 'off';
+    hp.setAttribute('aria-hidden', 'true');
+    var row = document.createElement('div');
+    row.className = 'remark-row';
+    var btn = document.createElement('button');
+    btn.type = 'submit';
+    btn.className = 'submit';
+    btn.textContent = '提交';
+    var counter = document.createElement('span');
+    counter.className = 'small';
+    counter.textContent = '0/' + MAX;
+    var status = document.createElement('span');
+    status.className = 'small';
+    status.setAttribute('role', 'status');
+    row.appendChild(btn);
+    row.appendChild(counter);
+    row.appendChild(status);
+    form.appendChild(label);
+    form.appendChild(ta);
+    form.appendChild(hp);
+    form.appendChild(row);
+    box.appendChild(list);
+    box.appendChild(form);
+    slot.el.appendChild(box);
+
+    ta.addEventListener('input', function () {
+      var n = count(ta.value);
+      counter.textContent = n + '/' + MAX;
+      status.textContent = '';
+    });
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var value = ta.value.trim();
+      if (!value) { status.textContent = '还没有写内容'; return; }
+      if (count(value) > MAX) { status.textContent = '超过 ' + MAX + ' 个字了'; return; }
+      btn.disabled = true;
+      status.textContent = '正在提交…';
+      var headers = { 'content-type': 'application/json' };
+      if (key) headers['x-edit-key'] = key;
+      fetch('/api/notes', { method: 'POST', headers: headers, body: JSON.stringify({ slot: slot.id, text: value, website: hp.value }) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); })
+        .then(function (res) {
+          btn.disabled = false;
+          if (res.ok) {
+            notes.push(res.body);
+            renderList(slot);
+            ta.value = '';
+            counter.textContent = '0/' + MAX;
+            status.textContent = '已提交';
+          } else if (res.status === 429) status.textContent = '提交得太快了，过几分钟再试';
+          else if (res.status === 413) status.textContent = '超过 ' + MAX + ' 个字了';
+          else if (res.status === 409) status.textContent = '这一段的备注已经满了';
+          else if (res.status === 400 && res.body && res.body.error === 'slot') status.textContent = '这一页更新过了，请刷新以后再提交';
+          else status.textContent = '没有提交成功（' + res.status + '）';
+        })
+        .catch(function () { btn.disabled = false; status.textContent = '没有提交成功，网络出了问题'; });
+    });
+  });
+
+  fetch('/api/notes', { cache: 'no-store' })
+    .then(function (r) { return r.ok ? r.json() : []; })
+    .then(function (list) { if (Array.isArray(list)) { notes = list; renderAll(); } })
+    .catch(function () {});
+})();
+</script>
+</body>
+</html>

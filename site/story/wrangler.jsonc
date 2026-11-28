@@ -1,0 +1,21 @@
+{
+  // 思考记录这一页在 Cloudflare 上的设置。
+  // 发布时不要在仓库文件夹里运行 wrangler（它会留下带账号信息的 .wrangler/），
+  // 先把 site/story 整个复制到仓库外面的一个文件夹里，再在那里运行 wrangler deploy。
+  "name": "fridge-vision-story",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-19",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "NOTES",
+      "id": "b423ad7ec957433cb5b6ab706106fc6b"
+    }
+  ]
+}
